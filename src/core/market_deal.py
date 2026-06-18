@@ -5,20 +5,23 @@ import requests
 import logging
 from typing import Optional
 
-from src.core import constants
+from src.core.settings import get_settings
 from src.core import database as db
 from dotenv import load_dotenv
 
 load_dotenv()
 
-MIN_ACCEPTABLE_PERCENT = constants.MIN_ACCEPTABLE_PERCENT
-FALLBACK_PRICES = constants.FALLBACK_PRICES
-CACHE_DURATION = constants.CACHE_DURATION
-INGOTS_PER_BLOCK = constants.INGOTS_PER_BLOCK
-NUGGETS_PER_INGOT = constants.NUGGETS_PER_INGOT
-API_TIMEOUT = constants.API_TIMEOUT
-API_RETRIES = constants.API_RETRIES
-API_RETRY_DELAY = constants.API_RETRY_DELAY
+_settings = get_settings()
+
+MIN_ACCEPTABLE_PERCENT = _settings.MIN_ACCEPTABLE_PERCENT
+FALLBACK_PRICES = _settings.FALLBACK_PRICES
+CACHE_DURATION = _settings.CACHE_DURATION
+INGOTS_PER_BLOCK = _settings.INGOTS_PER_BLOCK
+NUGGETS_PER_INGOT = _settings.NUGGETS_PER_INGOT
+API_TIMEOUT = _settings.API_TIMEOUT
+API_RETRIES = _settings.API_RETRIES
+API_RETRY_DELAY = _settings.API_RETRY_DELAY
+PRICE_DAYS_LOOKBACK = _settings.PRICE_DAYS_LOOKBACK
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +78,7 @@ class MarketDeal:
         api_key = get_api_key()
         url = (
             f"https://api.democracycraft.net/economy/api/v1/chestshop/items/"
-            f"{encoded_name}?days=30"
+            f"{encoded_name}?days={PRICE_DAYS_LOOKBACK}"
         )
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -181,3 +184,129 @@ class MarketDeal:
         """Log a deal to the SQLite database."""
         db.log_deal(iron, gold, diamonds, market_value, offered_val, status,
                     iron_price, gold_price, diamond_price)
+
+    # ------------------------------------------------------------------
+    # Item lookup (any item via API)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def lookup_item(item_name: str, cache: dict) -> dict:
+        """
+        Look up an arbitrary item via the DemocracyCraft API.
+        Returns a dict with keys: item_name, avg_unit_price, cheapest_shops,
+        total_trades, all_prices, min_price, max_price.
+        Caches the avg_unit_price under 'item_name' in the cache dict.
+        Falls back gracefully on failure.
+        """
+        current_time = time.time()
+
+        # Return cached avg price if still valid
+        if item_name in cache:
+            entry = cache[item_name]
+            if current_time - entry["timestamp"] < CACHE_DURATION:
+                return {
+                    "item_name": item_name,
+                    "avg_unit_price": entry["price"],
+                    "cached": True,
+                }
+
+        logger.info("Looking up item '%s' …", item_name)
+        encoded_name = item_name.replace(" ", "%20").strip()
+
+        api_key = get_api_key()
+        url = (
+            f"https://api.democracycraft.net/economy/api/v1/chestshop/items/"
+            f"{encoded_name}?days={PRICE_DAYS_LOOKBACK}"
+        )
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        }
+
+        result: Optional[dict] = None
+
+        for attempt in range(1, API_RETRIES + 1):
+            try:
+                response = requests.get(url, headers=headers, timeout=API_TIMEOUT)
+                if response.status_code == 200:
+                    data = response.json()
+                    avg = data.get("avgUnitPrice")
+                    shops = data.get("cheapestShops", [])
+                    all_prices = []
+                    for s in shops:
+                        if s.get("buyPrice") is not None:
+                            all_prices.append(float(s["buyPrice"]))
+
+                    result = {
+                        "item_name": item_name,
+                        "avg_unit_price": float(avg) if avg else None,
+                        "cheapest_shops": shops,
+                        "total_trades": data.get("totalTrades", 0),
+                        "all_prices": all_prices,
+                        "min_price": min(all_prices) if all_prices else None,
+                        "max_price": max(all_prices) if all_prices else None,
+                        "shop_count": len(shops),
+                        "cached": False,
+                    }
+
+                    # Cache the avg price for future quick lookups
+                    if avg:
+                        cache[item_name] = {
+                            "price": float(avg),
+                            "timestamp": current_time,
+                        }
+
+                    logger.info(
+                        "Item '%s' — avg: %s, shops: %d, trades: %s",
+                        item_name,
+                        f"${float(avg):.2f}" if avg else "N/A",
+                        len(shops),
+                        data.get("totalTrades", "N/A"),
+                    )
+                    break
+
+                logger.warning(
+                    "API attempt %d/%d – Status %s",
+                    attempt, API_RETRIES, response.status_code,
+                )
+
+            except requests.RequestException as exc:
+                logger.warning(
+                    "API attempt %d/%d – Error: %s",
+                    attempt, API_RETRIES, exc,
+                )
+
+            if attempt < API_RETRIES:
+                time.sleep(API_RETRY_DELAY)
+
+        # Fallback
+        if result is None:
+            fallback_price = FALLBACK_PRICES.get(item_name, None)
+            if fallback_price is not None:
+                logger.warning("Using fallback price for '%s'.", item_name)
+                result = {
+                    "item_name": item_name,
+                    "avg_unit_price": fallback_price,
+                    "cheapest_shops": [],
+                    "total_trades": 0,
+                    "all_prices": [],
+                    "min_price": fallback_price,
+                    "max_price": fallback_price,
+                    "shop_count": 0,
+                    "cached": False,
+                }
+            else:
+                logger.warning("No data available for '%s'.", item_name)
+                result = {
+                    "item_name": item_name,
+                    "avg_unit_price": None,
+                    "cheapest_shops": [],
+                    "total_trades": 0,
+                    "all_prices": [],
+                    "min_price": None,
+                    "max_price": None,
+                    "shop_count": 0,
+                    "cached": False,
+                    "error": "No price data available for this item.",
+                }
+
+        return result

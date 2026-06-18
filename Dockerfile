@@ -21,8 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---- Dependencies stage ----
 FROM base AS deps
 
-COPY pyproject.toml uv.lock ./
-RUN pip install --no-cache-dir uv && uv sync --no-dev --frozen
+# Copy only the dependency files first (for caching)
+COPY pyproject.toml requirements.txt ./
+# Install packages system-wide (not into .venv)
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ---- Runtime stage ----
 FROM deps AS runtime

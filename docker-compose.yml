@@ -1,40 +1,32 @@
 # =============================================================================
 # docker-compose.yml – DC Trade Toolbox
 # 
-# STANDARD (SQLite – kein Setup nötig):
+# EINFACH STARTEN (SQLite – kein Setup nötig):
 #   docker compose up -d
 #
-# MIT PostgreSQL (optional, für Produktion):
+# MIT PostgreSQL (optional):
 #   docker compose --profile db up -d
 # =============================================================================
 
-version: "3.9"
-
 services:
   # ---------- Main application (Streamlit + FastAPI) ----------
-  # Nutzt SQLite out-of-the-box. Keine PostgreSQL nötig.
   app:
     image: dc-trade:latest
     build: .
     container_name: dc-trade
     restart: unless-stopped
     ports:
-      - "8501:8501"   # Streamlit web UI
-      - "8000:8000"   # FastAPI REST API
+      - "${STREAMLIT_PORT:-8501}:8501"   # Streamlit web UI
+      - "${API_PORT:-8000}:8000"         # FastAPI REST API
     environment:
       - DC_API_KEY=${DC_API_KEY:-}
       - COMPANY_NAME=${COMPANY_NAME:-Fishy Business}
-      # DATABASE_URL nicht setzen = SQLite (Default)
-      # Für PostgreSQL: DATABASE_URL=postgres://dctrade:changeme@postgres:5432/dctrade
+      - STREAMLIT_PORT=${STREAMLIT_PORT:-8501}
+      - API_PORT=${API_PORT:-8000}
     volumes:
       - dc_trade_data:/app/data
-    profiles:
-      - default
-      - db
 
-  # ---------- PostgreSQL (optional – nur für Produktion) ----------
-  # Wird NUR gestartet mit: docker compose --profile db up -d
-  # Solange du kein DATABASE_URL setzt, bleibt alles bei SQLite.
+  # ---------- PostgreSQL (optional – für Produktion) ----------
   postgres:
     image: postgres:16-alpine
     container_name: dc-trade-db
@@ -50,7 +42,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SH", "pg_isready -U dctrade"]
+      test: ["CMD-SHELL", "pg_isready -U dctrade"]
       interval: 10s
       timeout: 5s
       retries: 5

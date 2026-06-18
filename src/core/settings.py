@@ -38,6 +38,7 @@ class Settings:
     API_TIMEOUT: int = int(os.getenv("API_TIMEOUT", "10"))
     API_RETRIES: int = int(os.getenv("API_RETRIES", "3"))
     API_RETRY_DELAY: int = int(os.getenv("API_RETRY_DELAY", "2"))
+    PRICE_DAYS_LOOKBACK: int = int(os.getenv("PRICE_DAYS_LOOKBACK", "30"))
 
     # ── Trading thresholds ───────────────────────────────────────────────
     MIN_ACCEPTABLE_PERCENT: float = float(os.getenv("MIN_ACCEPTABLE_PERCENT", "0.85"))

@@ -3,12 +3,13 @@ import os
 import sys
 import logging
 from src.core.market_deal import MarketDeal
-from src.core import constants
+from src.core.settings import get_settings
 from src.core import database as db
 
-ITEMS_PER_STACK = constants.ITEMS_PER_STACK
-ITEMS_PER_SHULKER = constants.ITEMS_PER_SHULKER
-INGOTS_PER_BLOCK = constants.INGOTS_PER_BLOCK
+_settings = get_settings()
+ITEMS_PER_STACK = _settings.ITEMS_PER_STACK
+ITEMS_PER_SHULKER = _settings.ITEMS_PER_SHULKER
+INGOTS_PER_BLOCK = _settings.INGOTS_PER_BLOCK
 
 logger = logging.getLogger(__name__)
 
@@ -420,7 +421,7 @@ def _calculate_and_show_result(
         total_market_value, offered_price, status,
         price_iron, price_gold, price_diamond,
     )
-    print(f"\n💾 Deal saved to database ({constants.DB_FILE}).")
+    print(f"\n💾 Deal saved to database ({_settings.DB_FILE}).")
     print("=" * 60)
 
 

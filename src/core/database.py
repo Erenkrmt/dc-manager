@@ -10,17 +10,19 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from src.core import constants
+from src.core.settings import get_settings
+
+_settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
 # Ensure the data directory exists
-os.makedirs(os.path.dirname(constants.DB_FILE) or ".", exist_ok=True)
+os.makedirs(os.path.dirname(_settings.DB_FILE) or ".", exist_ok=True)
 
 
 def get_connection() -> sqlite3.Connection:
     """Create and return a connection to the SQLite database."""
-    conn = sqlite3.connect(constants.DB_FILE)
+    conn = sqlite3.connect(_settings.DB_FILE)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -75,6 +77,18 @@ def init_db() -> None:
                 diamond_price REAL DEFAULT 0
             );
 
+            CREATE TABLE IF NOT EXISTS item_lookup_deals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                item_name TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                unit_price REAL NOT NULL,
+                total_value REAL NOT NULL,
+                offered_price REAL NOT NULL,
+                status TEXT DEFAULT '',
+                profit REAL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS stash (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 name TEXT DEFAULT 'Default',
@@ -111,7 +125,7 @@ def init_db() -> None:
             logger.debug("Migration: added raw_gold_blocks column to stash table.")
         except sqlite3.OperationalError:
             pass
-        logger.debug("Database initialized: %s", constants.DB_FILE)
+        logger.debug("Database initialized: %s", _settings.DB_FILE)
     except sqlite3.Error as exc:
         logger.error("Failed to initialize database: %s", exc)
     finally:
@@ -373,6 +387,98 @@ def get_deal_stats() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Item Lookup Deal logging
+# ---------------------------------------------------------------------------
+def log_item_deal(
+    item_name: str,
+    quantity: int,
+    unit_price: float,
+    total_value: float,
+    offered_price: float,
+    status: str,
+    profit: float,
+) -> None:
+    """Insert a lookup-item deal into the SQLite database."""
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO item_lookup_deals
+               (timestamp, item_name, quantity, unit_price, total_value, offered_price, status, profit)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (date_str, item_name, quantity, unit_price, total_value, offered_price, status, profit),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Item lookup deal logged: %s | %s | %s", item_name, status, date_str)
+    except sqlite3.Error as exc:
+        logger.error("Failed to log item lookup deal: %s", exc)
+
+
+def get_item_lookup_deals(limit: int = 100) -> list:
+    """Return the most recent item lookup deals."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM item_lookup_deals ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return rows
+    except sqlite3.Error as exc:
+        logger.error("Failed to fetch item lookup deals: %s", exc)
+        return []
+
+
+def get_item_lookup_stats() -> dict:
+    """Return aggregate statistics from the item_lookup_deals table."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                COUNT(*) AS total_deals,
+                COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%' THEN 1 ELSE 0 END), 0) AS accepted,
+                COALESCE(SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END), 0) AS rejected,
+                COALESCE(SUM(profit), 0) AS total_profit,
+                COALESCE(AVG(profit), 0) AS avg_profit,
+                COALESCE(SUM(total_value), 0) AS total_market_value
+            FROM item_lookup_deals
+        """)
+        stats = dict(cursor.fetchone())
+        conn.close()
+        return stats
+    except sqlite3.Error as exc:
+        logger.error("Failed to fetch item lookup stats: %s", exc)
+        return {
+            "total_deals": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "total_profit": 0,
+            "avg_profit": 0,
+            "total_market_value": 0,
+        }
+
+
+def delete_item_lookup_deal(deal_id: int) -> bool:
+    """Delete an item lookup deal by ID. Returns True on success."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM item_lookup_deals WHERE id = ?", (deal_id,))
+        conn.commit()
+        conn.close()
+        logger.info("Item lookup deal %d deleted.", deal_id)
+        return True
+    except sqlite3.Error as exc:
+        logger.error("Failed to delete item lookup deal %d: %s", deal_id, exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Stash (inventory) operations
 # ---------------------------------------------------------------------------
 DEFAULT_STASH = {
@@ -510,14 +616,14 @@ def import_items_to_stash(raw_text: str) -> tuple[dict, list[str], list[str]]:
             continue
 
         # Check if this item name matches a mapped field
-        stash_field = constants.IMPORT_ITEM_MAPPING.get(item_name)
+        stash_field = _settings.IMPORT_ITEM_MAPPING.get(item_name)
         if stash_field is None:
             skipped_lines.append(line)
             continue
 
         # Apply any factor (e.g. nugget -> ingot conversion)
         # Check if item name ends with a known suffix
-        for suffix, factor in constants.IMPORT_ITEM_FACTORS.items():
+        for suffix, factor in _settings.IMPORT_ITEM_FACTORS.items():
             if item_name.lower().endswith(suffix.lower()):
                 count = int(count * factor)
                 break
@@ -609,19 +715,19 @@ def subtract_from_stash(
     # Iron
     new_ir_b, new_ir_i, ir_b_used, ir_i_used = _subtract_material(
         stash["iron_blocks"], stash["iron_ingots"],
-        int(iron_ingots), constants.INGOTS_PER_BLOCK,
+        int(iron_ingots), _settings.INGOTS_PER_BLOCK,
     )
 
     # Gold
     new_go_b, new_go_i, go_b_used, go_i_used = _subtract_material(
         stash["gold_blocks"], stash["gold_ingots"],
-        int(gold_ingots), constants.INGOTS_PER_BLOCK,
+        int(gold_ingots), _settings.INGOTS_PER_BLOCK,
     )
 
     # Diamond (same logic: blocks = 9 items per block)
     new_di_b, new_di_i, di_b_used, di_i_used = _subtract_material(
         stash["diamond_blocks"], stash["diamond_items"],
-        int(diamond_items), constants.INGOTS_PER_BLOCK,
+        int(diamond_items), _settings.INGOTS_PER_BLOCK,
     )
 
     # Save updated stash

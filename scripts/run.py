@@ -23,12 +23,16 @@ def main() -> None:
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+    # Read ports from environment (with defaults)
+    api_port = os.getenv("API_PORT", "8000")
+    streamlit_port = os.getenv("STREAMLIT_PORT", "8501")
+
     # Start FastAPI server
     api_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", "8000"],
+        [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", api_port],
         cwd=project_root,
     )
-    logger.info("FastAPI server started on port 8000 (PID %d)", api_process.pid)
+    logger.info("FastAPI server started on port %s (PID %d)", api_port, api_process.pid)
 
     # Small delay to let API start before Streamlit tries to launch its thread
     time.sleep(1)
@@ -37,14 +41,14 @@ def main() -> None:
     streamlit_process = subprocess.Popen(
         [
             sys.executable, "-m", "streamlit", "run", "src/web/app.py",
-            "--server.port", "8501",
+            "--server.port", streamlit_port,
             "--server.address", "0.0.0.0",
             "--server.headless", "true",
             "--browser.gatherUsageStats", "false",
         ],
         cwd=project_root,
     )
-    logger.info("Streamlit started on port 8501 (PID %d)", streamlit_process.pid)
+    logger.info("Streamlit started on port %s (PID %d)", streamlit_port, streamlit_process.pid)
 
     # Forward signals to both processes
     def signal_handler(sig, _frame):

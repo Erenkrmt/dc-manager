@@ -16,8 +16,10 @@ import streamlit as st
 import pandas as pd
 
 from src.core.market_deal import MarketDeal
-from src.core import constants
+from src.core.settings import get_settings
 from src.core import database as db
+
+_settings = get_settings()
 
 # Initialize database schema on startup
 db.init_db()
@@ -26,9 +28,10 @@ db.init_db()
 def _start_api_server():
     """Start the FastAPI server in a background thread."""
     project_root = Path(__file__).resolve().parents[2]
+    api_port = os.getenv("API_PORT", "8000")
     try:
         subprocess.run(
-            [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", "8000"],
+            [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", api_port],
             cwd=str(project_root),
             check=False,
         )
@@ -49,7 +52,7 @@ def main() -> None:
 
 # Page config
 st.set_page_config(
-    page_title=f"{constants.COMPANY_NAME} Toolbox",
+    page_title=f"{_settings.COMPANY_NAME} Toolbox",
     page_icon="⛏️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -58,7 +61,7 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Helper: fetch live prices (cached)
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=constants.CACHE_DURATION, show_spinner="⏳ Fetching live prices...")
+@st.cache_data(ttl=_settings.CACHE_DURATION, show_spinner="⏳ Fetching live prices...")
 def fetch_prices() -> tuple[float, float, float]:
     cache = MarketDeal.load_cache()
     p_iron = MarketDeal.get_price("Iron Ingot", cache)
@@ -71,7 +74,7 @@ def fetch_prices() -> tuple[float, float, float]:
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
-st.sidebar.title(f"⛏️ {constants.COMPANY_NAME} Toolbox")
+st.sidebar.title(f"⛏️ {_settings.COMPANY_NAME} Toolbox")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
@@ -83,6 +86,7 @@ page = st.sidebar.radio(
         "📊 Deal History",
         "📦 Stash Manager",
         "📋 Deal Templates",
+        "🔍 Item Lookup",
         "📈 Price History",
     ],
 )
@@ -98,20 +102,26 @@ st.sidebar.metric("Gold Ingot", f"${price_gold:.2f}")
 st.sidebar.metric("Diamond", f"${price_diamond:.2f}")
 
 # Block and stack-of-blocks prices
-iron_block_price = price_iron * constants.INGOTS_PER_BLOCK
-gold_block_price = price_gold * constants.INGOTS_PER_BLOCK
-diamond_block_price = price_diamond * constants.INGOTS_PER_BLOCK
+iron_block_price = price_iron * _settings.INGOTS_PER_BLOCK
+gold_block_price = price_gold * _settings.INGOTS_PER_BLOCK
+diamond_block_price = price_diamond * _settings.INGOTS_PER_BLOCK
 
-prices_block_col1, prices_block_col2 = st.sidebar.columns(2)
+min_pct = _settings.MIN_ACCEPTABLE_PERCENT
+
+prices_block_col1, prices_block_col2, prices_block_col3 = st.sidebar.columns(3)
 prices_block_col1.caption("💰 **Per Block**")
 prices_block_col2.caption("💰 **Per Stack of Blocks**")
+prices_block_col3.caption(f"📉 **Min ({min_pct*100:.0f}%) / Stack**")
 
 prices_block_col1.metric("Iron", f"${iron_block_price:.2f}")
 prices_block_col2.metric("Iron", f"${iron_block_price * 64:,.2f}")
+prices_block_col3.metric("Iron", f"${iron_block_price * 64 * min_pct:,.2f}", delta=f"-{(1-min_pct)*100:.0f}%")
 prices_block_col1.metric("Gold", f"${gold_block_price:.2f}")
 prices_block_col2.metric("Gold", f"${gold_block_price * 64:,.2f}")
+prices_block_col3.metric("Gold", f"${gold_block_price * 64 * min_pct:,.2f}", delta=f"-{(1-min_pct)*100:.0f}%")
 prices_block_col1.metric("Diamond", f"${diamond_block_price:.2f}")
 prices_block_col2.metric("Diamond", f"${diamond_block_price * 64:,.2f}")
+prices_block_col3.metric("Diamond", f"${diamond_block_price * 64 * min_pct:,.2f}", delta=f"-{(1-min_pct)*100:.0f}%")
 
 # Fetch and display stash in sidebar
 stash_summary = db.load_stash()
@@ -119,11 +129,11 @@ st.sidebar.subheader("📦 Your Stash")
 
 # Helper: compute total ingot equivalents including raw blocks (treated as same value)
 def _total_iron_ingots(s: dict) -> int:
-    return (s.get("iron_blocks", 0) + s.get("raw_iron_blocks", 0)) * constants.INGOTS_PER_BLOCK + s.get("iron_ingots", 0)
+    return (s.get("iron_blocks", 0) + s.get("raw_iron_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("iron_ingots", 0)
 def _total_gold_ingots(s: dict) -> int:
-    return (s.get("gold_blocks", 0) + s.get("raw_gold_blocks", 0)) * constants.INGOTS_PER_BLOCK + s.get("gold_ingots", 0)
+    return (s.get("gold_blocks", 0) + s.get("raw_gold_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("gold_ingots", 0)
 def _total_diamond_items(s: dict) -> int:
-    return s.get("diamond_blocks", 0) * constants.INGOTS_PER_BLOCK + s.get("diamond_items", 0)
+    return s.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK + s.get("diamond_items", 0)
 
 if stash_summary.get("updated_at") != "never" and any(
     [stash_summary["iron_blocks"], stash_summary["iron_ingots"],
@@ -168,8 +178,8 @@ else:
     st.sidebar.caption("Empty — add materials in Stash Manager.")
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"Data cached for {constants.CACHE_DURATION // 3600}h")
-st.sidebar.caption(f"Database: `{constants.DB_FILE}`")
+st.sidebar.caption(f"Data cached for {_settings.CACHE_DURATION // 3600}h")
+st.sidebar.caption(f"Database: `{_settings.DB_FILE}`")
 
 
 # ---------------------------------------------------------------------------
@@ -208,8 +218,8 @@ def analyze_deal(
         status_color = "red"
         status_msg = f"❌ Too cheap! Need {min_needed - offered_price:.2f}$ more to your limit."
 
-    stacks = (iron_ingots + gold_ingots + diamond_items) / float(constants.ITEMS_PER_STACK)
-    shulkers = (iron_ingots + gold_ingots + diamond_items) / float(constants.ITEMS_PER_SHULKER)
+    stacks = (iron_ingots + gold_ingots + diamond_items) / float(_settings.ITEMS_PER_STACK)
+    shulkers = (iron_ingots + gold_ingots + diamond_items) / float(_settings.ITEMS_PER_SHULKER)
 
     # Counter-offer logic
     counter_offer = None
@@ -246,9 +256,9 @@ def analyze_deal(
 # ---------------------------------------------------------------------------
 def stash_ingot_equivalents(stash: dict) -> tuple:
     """Return (iron_ingots, gold_ingots, diamond_items) from stash dict."""
-    iron = stash["iron_blocks"] * constants.INGOTS_PER_BLOCK + stash["iron_ingots"]
-    gold = stash["gold_blocks"] * constants.INGOTS_PER_BLOCK + stash["gold_ingots"]
-    diamond = stash["diamond_blocks"] * constants.INGOTS_PER_BLOCK + stash["diamond_items"]
+    iron = stash["iron_blocks"] * _settings.INGOTS_PER_BLOCK + stash["iron_ingots"]
+    gold = stash["gold_blocks"] * _settings.INGOTS_PER_BLOCK + stash["gold_ingots"]
+    diamond = stash["diamond_blocks"] * _settings.INGOTS_PER_BLOCK + stash["diamond_items"]
     return iron, gold, diamond
 
 
@@ -735,11 +745,11 @@ elif page == "⚡ Quick Converter":
 
     if st.button("🔄 Convert", type="primary", use_container_width=True):
         amount = base_amount * multiplier
-        blocks = amount // constants.INGOTS_PER_BLOCK
-        rest_ingots = amount % constants.INGOTS_PER_BLOCK
-        stacks = amount // constants.ITEMS_PER_STACK
-        rest_items = amount % constants.ITEMS_PER_STACK
-        shulkers = amount / constants.ITEMS_PER_SHULKER
+        blocks = amount // _settings.INGOTS_PER_BLOCK
+        rest_ingots = amount % _settings.INGOTS_PER_BLOCK
+        stacks = amount // _settings.ITEMS_PER_STACK
+        rest_items = amount % _settings.ITEMS_PER_STACK
+        shulkers = amount / _settings.ITEMS_PER_SHULKER
 
         iron_value = amount * price_iron
         gold_value = amount * price_gold
@@ -861,11 +871,11 @@ elif page == "📦 Stash Manager":
 
     # Helper: ingot totals including raw blocks (treated as same value)
     def _total_iron(s: dict) -> int:
-        return (s.get("iron_blocks", 0) + s.get("raw_iron_blocks", 0)) * constants.INGOTS_PER_BLOCK + s.get("iron_ingots", 0)
+        return (s.get("iron_blocks", 0) + s.get("raw_iron_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("iron_ingots", 0)
     def _total_gold(s: dict) -> int:
-        return (s.get("gold_blocks", 0) + s.get("raw_gold_blocks", 0)) * constants.INGOTS_PER_BLOCK + s.get("gold_ingots", 0)
+        return (s.get("gold_blocks", 0) + s.get("raw_gold_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("gold_ingots", 0)
     def _total_diamond(s: dict) -> int:
-        return s.get("diamond_blocks", 0) * constants.INGOTS_PER_BLOCK + s.get("diamond_items", 0)
+        return s.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK + s.get("diamond_items", 0)
 
     total_iron = _total_iron(stash)
     total_gold = _total_gold(stash)
@@ -877,8 +887,8 @@ elif page == "📦 Stash Manager":
     diamond_value = total_diamond * price_diamond
     total_value = iron_value + gold_value + diamond_value
 
-    stacks = (total_iron + total_gold + total_diamond) / float(constants.ITEMS_PER_STACK)
-    shulkers = (total_iron + total_gold + total_diamond) / float(constants.ITEMS_PER_SHULKER)
+    stacks = (total_iron + total_gold + total_diamond) / float(_settings.ITEMS_PER_STACK)
+    shulkers = (total_iron + total_gold + total_diamond) / float(_settings.ITEMS_PER_SHULKER)
 
     # Display current stash
     st.subheader("📦 Current Stash")
@@ -1135,6 +1145,235 @@ elif page == "📋 Deal Templates":
                 st.rerun()
     else:
         st.info("No templates saved yet. Create one above!")
+
+
+# ===========================================================================
+# PAGE: Item Lookup
+# ===========================================================================
+elif page == "🔍 Item Lookup":
+    st.header("🔍 Item Lookup")
+    st.markdown("Look up any item from the DemocracyCraft economy API and run a quick deal analysis.")
+
+    col_search, col_btn = st.columns([4, 1])
+    with col_search:
+        item_name = st.text_input(
+            "Item name",
+            placeholder="e.g. Saddle, Netherite Ingot, Enchanted Golden Apple",
+            key="item_lookup_name",
+        )
+    with col_btn:
+        st.markdown("##### &nbsp;")
+        lookup_clicked = st.button("🔍 Lookup", type="primary", use_container_width=True)
+
+    if lookup_clicked and item_name.strip():
+        with st.spinner(f"⏳ Looking up '{item_name}' …"):
+            cache = MarketDeal.load_cache()
+            info = MarketDeal.lookup_item(item_name.strip(), cache)
+            MarketDeal.save_cache(cache)
+            # Store lookup data under a non-widget key (leading underscore)
+            st.session_state._lookup_info = info
+
+        if info.get("error"):
+            st.error(f"❌ {info['error']}")
+        elif info.get("cached"):
+            st.info("📦 Results from cache — cached price shown below.")
+            st.metric("Avg. Unit Price", f"${info['avg_unit_price']:.2f}")
+        else:
+            st.success("✅ Item found!")
+
+            col_i1, col_i2, col_i3, col_i4 = st.columns(4)
+            avg_price = info.get("avg_unit_price")
+            col_i1.metric(
+                "💰 Avg. Unit Price",
+                f"${avg_price:.2f}" if avg_price else "N/A",
+            )
+            col_i2.metric("🏪 Active Shops", info.get("shop_count", 0))
+            col_i3.metric(
+                "📉 Min Price",
+                f"${info['min_price']:.2f}" if info.get("min_price") else "N/A",
+            )
+            col_i4.metric(
+                "📈 Max Price",
+                f"${info['max_price']:.2f}" if info.get("max_price") else "N/A",
+            )
+            col_trades = st.columns([1])
+            col_trades[0].metric("📊 Total Trades (30d)", info.get("total_trades", 0))
+
+            # Show cheapest shops table
+            if info.get("cheapest_shops"):
+                with st.expander("🏪 Cheapest Shops", expanded=False):
+                    shop_rows = []
+                    for s in info["cheapest_shops"]:
+                        shop_rows.append({
+                            "Shop": s.get("shopName", "?"),
+                            "Buy Price": f"${float(s['buyPrice']):.2f}" if s.get("buyPrice") else "?",
+                            "Sell Price": f"${float(s['sellPrice']):.2f}" if s.get("sellPrice") else "?",
+                            "Stock": s.get("stock", "?"),
+                        })
+                    st.table(shop_rows)
+
+            # ── Deal Analysis ──
+            st.markdown("---")
+            st.subheader("💼 Deal Analysis")
+
+    # Deal analysis inputs (shown if we have lookup data in session state)
+    info = st.session_state.get("_lookup_info")
+    item_name = st.session_state.get("item_lookup_name", "")
+
+    if info and info.get("avg_unit_price"):
+        avg_price = info["avg_unit_price"]
+
+        if "item_lookup_qty" not in st.session_state:
+            st.session_state.item_lookup_qty = 1
+        if "item_lookup_offer" not in st.session_state:
+            st.session_state.item_lookup_offer = 0.0
+
+        col_q, col_o = st.columns(2)
+        with col_q:
+            quantity = st.number_input(
+                f"Quantity ({item_name})",
+                min_value=1, step=1, value=st.session_state.item_lookup_qty,
+                key="item_lookup_qty_input",
+            )
+        with col_o:
+            offered_price = st.number_input(
+                "💰 Offered Price ($)",
+                min_value=0.0, step=0.5, value=st.session_state.item_lookup_offer,
+                key="item_lookup_offer_input",
+            )
+
+        if st.button("📊 Calculate", type="primary", use_container_width=True, key="item_lookup_calc"):
+            total_value = quantity * avg_price
+            profit = offered_price - total_value
+            min_acceptable = total_value * MarketDeal.MIN_ACCEPTABLE_PERCENT
+
+            if offered_price >= total_value:
+                status = "ACCEPTED (PROFIT)"
+                status_msg = f"✅ +${profit:.2f} profit over market value (${total_value:.2f})."
+            elif offered_price >= min_acceptable:
+                status = "ACCEPTED (BULK)"
+                status_msg = f"🟡 OK! Within bulk discount (${abs(profit):.2f} discount from ${total_value:.2f})."
+            else:
+                status = "REJECTED"
+                status_msg = f"❌ Too cheap! Need ${min_acceptable - offered_price:.2f} more to reach your limit."
+
+            st.session_state.item_lookup_result = {
+                "item_name": item_name,
+                "quantity": quantity,
+                "unit_price": avg_price,
+                "total_value": total_value,
+                "offered_price": offered_price,
+                "status": status,
+                "status_msg": status_msg,
+                "profit": profit,
+                "min_acceptable": min_acceptable,
+            }
+
+        # Display result
+        if "item_lookup_result" in st.session_state and st.session_state.item_lookup_result:
+            r = st.session_state.item_lookup_result
+            st.markdown("---")
+            col_r1, col_r2, col_r3 = st.columns(3)
+            col_r1.metric("Market Value", f"${r['total_value']:.2f}")
+            col_r2.metric("Your Offer", f"${r['offered_price']:.2f}")
+            col_r3.metric("Profit / Loss", f"${r['profit']:.2f}", delta=f"${r['profit']:.2f}")
+
+            st.markdown(f"### {r['status']}")
+            st.markdown(f"**{r['status_msg']}**")
+
+            # ── Save Deal UI (like Deal Calculator) ──
+            st.markdown("---")
+            st.subheader("💾 Save Deal")
+
+            col_log1, col_log2 = st.columns([1, 1])
+            with col_log1:
+                auto_status = r["status"]
+                status_options = [
+                    f"Auto: {auto_status}",
+                    "ACCEPTED (PROFIT)",
+                    "ACCEPTED (BULK)",
+                    "REJECTED",
+                    "CUSTOM",
+                ]
+                selected_status = st.selectbox(
+                    "Deal Status",
+                    status_options,
+                    key="item_lookup_status_select",
+                )
+                if selected_status == f"Auto: {auto_status}":
+                    final_status = auto_status
+                elif selected_status == "CUSTOM":
+                    final_status = st.text_input(
+                        "Enter custom status:",
+                        key="item_lookup_custom_status",
+                    )
+                    if not final_status.strip():
+                        final_status = auto_status
+                else:
+                    final_status = selected_status
+
+            with col_log2:
+                manual_offer = st.number_input(
+                    "Offered Price ($) (override if needed)",
+                    min_value=0.0, step=0.5,
+                    value=r["offered_price"],
+                    key="item_lookup_manual_offer",
+                )
+
+            if st.button("💾 Log this deal to database", key="item_lookup_log", use_container_width=True):
+                # Recalculate profit with manual offer
+                calc_profit = manual_offer - r["total_value"]
+                db.log_item_deal(
+                    item_name=r["item_name"],
+                    quantity=r["quantity"],
+                    unit_price=r["unit_price"],
+                    total_value=r["total_value"],
+                    offered_price=manual_offer,
+                    status=final_status,
+                    profit=calc_profit,
+                )
+                st.success(f"✅ Item lookup deal logged to database as '{final_status}'!")
+
+    # ── Lookup Deal History ──
+    st.markdown("---")
+    st.subheader("📋 Lookup Deal History")
+    lookup_deals = db.get_item_lookup_deals(limit=50)
+    if lookup_deals:
+        df_lookup = pd.DataFrame(lookup_deals)
+        df_lookup["Date/Time"] = pd.to_datetime(df_lookup["timestamp"])
+        df_lookup = df_lookup.sort_values("Date/Time", ascending=False)
+        df_display = df_lookup.rename(columns={
+            "item_name": "Item",
+            "quantity": "Qty",
+            "unit_price": "Unit Price",
+            "total_value": "Market Value",
+            "offered_price": "Offered",
+            "status": "Status",
+            "profit": "Profit",
+        })
+        # Drop raw columns not needed for display
+        df_display = df_display.drop(columns=["id", "timestamp"], errors="ignore")
+        st.dataframe(df_display[["Date/Time", "Item", "Qty", "Unit Price", "Market Value", "Offered", "Status", "Profit"]],
+                     use_container_width=True, hide_index=True)
+
+        # Stats
+        lookup_stats = db.get_item_lookup_stats()
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        col_s1.metric("Total Lookup Deals", lookup_stats["total_deals"])
+        col_s2.metric("Accepted", lookup_stats["accepted"])
+        col_s3.metric("Total Profit", f"${lookup_stats['total_profit']:,.2f}")
+        col_s4.metric("Avg Profit/Deal", f"${lookup_stats['avg_profit']:,.2f}")
+
+        # Delete button
+        deal_ids = [d["id"] for d in lookup_deals]
+        if deal_ids:
+            del_id = st.selectbox("Delete a lookup deal by ID:", deal_ids, key="item_lookup_del")
+            if st.button("🗑️ Delete", key="item_lookup_del_btn"):
+                if db.delete_item_lookup_deal(del_id):
+                    st.success(f"✅ Deal #{del_id} deleted!")
+                    st.rerun()
+    else:
+        st.info("No item lookup deals saved yet. Look up an item and save a deal above!")
 
 
 # ===========================================================================

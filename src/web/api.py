@@ -14,7 +14,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from src.core import database as db
-from src.core import constants
+from src.core.settings import get_settings
+
+_settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +30,8 @@ async def lifespan(_app):
 
 
 app = FastAPI(
-    title=f"{constants.COMPANY_NAME} Toolbox API",
-    description=f"REST API for the {constants.COMPANY_NAME} Trading Toolbox",
+    title=f"{_settings.COMPANY_NAME} Toolbox API",
+    description=f"REST API for the {_settings.COMPANY_NAME} Trading Toolbox",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -45,9 +47,9 @@ def get_stash() -> dict:
     stash = db.load_stash()
     # Calculate ingot equivalents for convenience (including raw blocks)
     stash["total_ingots"] = {
-        "iron": (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)) * constants.INGOTS_PER_BLOCK + stash.get("iron_ingots", 0),
-        "gold": (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)) * constants.INGOTS_PER_BLOCK + stash.get("gold_ingots", 0),
-        "diamond": stash.get("diamond_blocks", 0) * constants.INGOTS_PER_BLOCK + stash.get("diamond_items", 0),
+        "iron": (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)) * _settings.INGOTS_PER_BLOCK + stash.get("iron_ingots", 0),
+        "gold": (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)) * _settings.INGOTS_PER_BLOCK + stash.get("gold_ingots", 0),
+        "diamond": stash.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK + stash.get("diamond_items", 0),
     }
     # Also include raw_* counts for convenience
     stash.setdefault("raw_iron_blocks", 0)
@@ -88,14 +90,14 @@ def get_prices() -> dict:
             "Diamond": p_diamond,
         },
         "per_block": {
-            "Iron Block": p_iron * constants.INGOTS_PER_BLOCK,
-            "Gold Block": p_gold * constants.INGOTS_PER_BLOCK,
-            "Diamond Block": p_diamond * constants.INGOTS_PER_BLOCK,
+            "Iron Block": p_iron * _settings.INGOTS_PER_BLOCK,
+            "Gold Block": p_gold * _settings.INGOTS_PER_BLOCK,
+            "Diamond Block": p_diamond * _settings.INGOTS_PER_BLOCK,
         },
         "per_stack_of_blocks": {
-            "Iron Block": p_iron * constants.INGOTS_PER_BLOCK * constants.ITEMS_PER_STACK,
-            "Gold Block": p_gold * constants.INGOTS_PER_BLOCK * constants.ITEMS_PER_STACK,
-            "Diamond Block": p_diamond * constants.INGOTS_PER_BLOCK * constants.ITEMS_PER_STACK,
+            "Iron Block": p_iron * _settings.INGOTS_PER_BLOCK * _settings.ITEMS_PER_STACK,
+            "Gold Block": p_gold * _settings.INGOTS_PER_BLOCK * _settings.ITEMS_PER_STACK,
+            "Diamond Block": p_diamond * _settings.INGOTS_PER_BLOCK * _settings.ITEMS_PER_STACK,
         },
     }
 
@@ -217,9 +219,9 @@ def get_stash_public() -> str:
     stash = db.load_stash()
 
     # Ingot totals (including raw blocks treated as same value)
-    total_iron = (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)) * constants.INGOTS_PER_BLOCK + stash.get("iron_ingots", 0)
-    total_gold = (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)) * constants.INGOTS_PER_BLOCK + stash.get("gold_ingots", 0)
-    total_diamond = stash.get("diamond_blocks", 0) * constants.INGOTS_PER_BLOCK + stash.get("diamond_items", 0)
+    total_iron = (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)) * _settings.INGOTS_PER_BLOCK + stash.get("iron_ingots", 0)
+    total_gold = (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)) * _settings.INGOTS_PER_BLOCK + stash.get("gold_ingots", 0)
+    total_diamond = stash.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK + stash.get("diamond_items", 0)
 
     # Prices
     cache = MarketDeal.load_cache()
@@ -235,7 +237,7 @@ def get_stash_public() -> str:
 
     updated_at = stash.get("updated_at", "never")
     stash_url = str(app.url_path_for("get_stash_raw"))
-    company_name = constants.COMPANY_NAME
+    company_name = _settings.COMPANY_NAME
 
     return _STASH_PUBLIC_HTML.format(
         company_name=company_name,
@@ -263,7 +265,7 @@ def health_check() -> dict:
     """Simple health check endpoint."""
     return {
         "status": "ok",
-        "database": constants.DB_FILE,
+        "database": _settings.DB_FILE,
     }
 
 
