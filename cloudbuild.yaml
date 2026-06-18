@@ -1,0 +1,71 @@
+# =============================================================================
+# Cloud Build configuration – DC Trade Toolbox
+#
+# Builds the Docker image and deploys to Cloud Run.
+#
+# Usage (from project root):
+#   gcloud builds submit --config=cloudbuild.yaml \
+#     --substitutions=_SERVICE_NAME=dc-trade-api,_REGION=europe-west1
+#
+# Required substitutions:
+#   _SERVICE_NAME  – Cloud Run service name (default: dc-trade-api)
+#   _REGION        – GCP region (default: europe-west1)
+# =============================================================================
+
+steps:
+  # Step 1: Build the container image with the Cloud Run-optimized Dockerfile
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/${_SERVICE_NAME}:$BUILD_ID'
+      - '-t'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/${_SERVICE_NAME}:latest'
+      - '-f'
+      - 'Dockerfile.cloudrun'
+      - '.'
+
+  # Step 2: Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/${_SERVICE_NAME}:$BUILD_ID'
+      - '--all-tags'
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image=europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/${_SERVICE_NAME}:$BUILD_ID'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=10'
+      - '--concurrency=80'
+      - '--timeout=300'
+      - '--set-secrets=DC_API_KEY=dc-api-key:latest'
+      - '--update-env-vars=COMPANY_NAME=Fishy Business,CACHE_DURATION=21600,DEBUG=false'
+      - '--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}'
+      - '--set-env-vars=DATABASE_URL=postgres://${_DB_USER}:${_DB_PASS}@//cloudsql/${_CLOUD_SQL_INSTANCE}/${_DB_NAME}'
+    wait_for:
+      - 'push'
+
+substitutions:
+  _SERVICE_NAME: dc-trade-api
+  _REGION: europe-west1
+  _CLOUD_SQL_INSTANCE: your-project:europe-west1:dc-trade-db
+  _DB_USER: dctrade
+  _DB_PASS: changeme
+  _DB_NAME: dctrade
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1200s

@@ -1,0 +1,21 @@
+# Google Cloud specific ignore file for Cloud Build deployments
+# This file controls which files are uploaded to Cloud Build
+
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+data/dc_trade.db
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env
+*.local
+README.md
+docker-compose.yml

@@ -54,7 +54,7 @@ class Settings:
 
     # ── Server ───────────────────────────────────────────────────────────
     STREAMLIT_PORT: int = int(os.getenv("STREAMLIT_PORT", "8501"))
-    API_PORT: int = int(os.getenv("API_PORT", "8000"))
+    API_PORT: int = int(os.getenv("API_PORT", os.getenv("PORT", "8000")))
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
 
     # ── Fallback prices ──────────────────────────────────────────────────

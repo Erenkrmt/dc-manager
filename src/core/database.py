@@ -1,14 +1,13 @@
 # src/core/database.py
 """
-SQLite database module for the DemocracyCraft Trading Toolbox.
-Replaces CSV logging with structured storage for deals and price cache.
+Database module for the DemocracyCraft Trading Toolbox.
+Supports SQLite (default, local dev) and PostgreSQL (production via Cloud SQL).
 """
 
 import os
-import sqlite3
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union, Any
 
 from src.core.settings import get_settings
 
@@ -16,118 +15,257 @@ _settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
-# Ensure the data directory exists
-os.makedirs(os.path.dirname(_settings.DB_FILE) or ".", exist_ok=True)
+# ── Detect backend ──────────────────────────────────────────────────────────
+_USE_POSTGRES = bool(_settings.DATABASE_URL)
+
+if _USE_POSTGRES:
+    try:
+        import psycopg2
+        import psycopg2.extras
+    except ImportError:
+        logger.error(
+            "DATABASE_URL is set but psycopg2 is not installed. "
+            "Install it with: pip install psycopg2-binary"
+        )
+        raise
+else:
+    import sqlite3
+    os.makedirs(os.path.dirname(_settings.DB_FILE) or ".", exist_ok=True)
 
 
-def get_connection() -> sqlite3.Connection:
-    """Create and return a connection to the SQLite database."""
-    conn = sqlite3.connect(_settings.DB_FILE)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+def get_connection():
+    """Create and return a database connection (SQLite or PostgreSQL)."""
+    if _USE_POSTGRES:
+        conn = psycopg2.connect(
+            _settings.DATABASE_URL,
+            sslmode="require",
+            cursor_factory=psycopg2.extras.RealDictCursor,
+        )
+        conn.autocommit = False
+        return conn
+    else:
+        conn = sqlite3.connect(_settings.DB_FILE)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+
+def _fetchone_as_dict(cursor) -> Optional[dict]:
+    """Fetch one row and return as a dict (works with both backends)."""
+    if _USE_POSTGRES:
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    else:
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def _fetchall_as_dicts(cursor) -> list[dict]:
+    """Fetch all rows and return as a list of dicts."""
+    if _USE_POSTGRES:
+        return [dict(row) for row in cursor.fetchall()]
+    else:
+        return [dict(row) for row in cursor.fetchall()]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Schema DDL (SQLite vs PostgreSQL)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_SQLITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS deals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    iron_ingots REAL DEFAULT 0,
+    gold_ingots REAL DEFAULT 0,
+    diamond_items REAL DEFAULT 0,
+    iron_price REAL DEFAULT 0,
+    gold_price REAL DEFAULT 0,
+    diamond_price REAL DEFAULT 0,
+    market_value REAL DEFAULT 0,
+    offered_price REAL DEFAULT 0,
+    status TEXT DEFAULT '',
+    profit REAL DEFAULT 0,
+    iron_amount REAL DEFAULT 0,
+    iron_unit TEXT DEFAULT 'ingot',
+    gold_amount REAL DEFAULT 0,
+    gold_unit TEXT DEFAULT 'ingot',
+    diamond_amount REAL DEFAULT 0,
+    diamond_unit TEXT DEFAULT 'ingot'
+);
+
+CREATE TABLE IF NOT EXISTS price_cache (
+    item_name TEXT PRIMARY KEY,
+    price REAL NOT NULL,
+    timestamp REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS templates (
+    name TEXT PRIMARY KEY,
+    iron_ingots REAL DEFAULT 0,
+    gold_ingots REAL DEFAULT 0,
+    diamond_items REAL DEFAULT 0,
+    offered_price REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    iron_price REAL DEFAULT 0,
+    gold_price REAL DEFAULT 0,
+    diamond_price REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS item_lookup_deals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price REAL NOT NULL,
+    total_value REAL NOT NULL,
+    offered_price REAL NOT NULL,
+    status TEXT DEFAULT '',
+    profit REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS stash (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    name TEXT DEFAULT 'Default',
+    iron_blocks INTEGER DEFAULT 0,
+    iron_ingots INTEGER DEFAULT 0,
+    gold_blocks INTEGER DEFAULT 0,
+    gold_ingots INTEGER DEFAULT 0,
+    diamond_blocks INTEGER DEFAULT 0,
+    diamond_items INTEGER DEFAULT 0,
+    raw_iron_blocks INTEGER DEFAULT 0,
+    raw_gold_blocks INTEGER DEFAULT 0,
+    auto_subtract INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+"""
+
+_PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS deals (
+    id SERIAL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    iron_ingots REAL DEFAULT 0,
+    gold_ingots REAL DEFAULT 0,
+    diamond_items REAL DEFAULT 0,
+    iron_price REAL DEFAULT 0,
+    gold_price REAL DEFAULT 0,
+    diamond_price REAL DEFAULT 0,
+    market_value REAL DEFAULT 0,
+    offered_price REAL DEFAULT 0,
+    status TEXT DEFAULT '',
+    profit REAL DEFAULT 0,
+    iron_amount REAL DEFAULT 0,
+    iron_unit TEXT DEFAULT 'ingot',
+    gold_amount REAL DEFAULT 0,
+    gold_unit TEXT DEFAULT 'ingot',
+    diamond_amount REAL DEFAULT 0,
+    diamond_unit TEXT DEFAULT 'ingot'
+);
+
+CREATE TABLE IF NOT EXISTS price_cache (
+    item_name TEXT PRIMARY KEY,
+    price REAL NOT NULL,
+    timestamp REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS templates (
+    name TEXT PRIMARY KEY,
+    iron_ingots REAL DEFAULT 0,
+    gold_ingots REAL DEFAULT 0,
+    diamond_items REAL DEFAULT 0,
+    offered_price REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id SERIAL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    iron_price REAL DEFAULT 0,
+    gold_price REAL DEFAULT 0,
+    diamond_price REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS item_lookup_deals (
+    id SERIAL PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price REAL NOT NULL,
+    total_value REAL NOT NULL,
+    offered_price REAL NOT NULL,
+    status TEXT DEFAULT '',
+    profit REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS stash (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    name TEXT DEFAULT 'Default',
+    iron_blocks INTEGER DEFAULT 0,
+    iron_ingots INTEGER DEFAULT 0,
+    gold_blocks INTEGER DEFAULT 0,
+    gold_ingots INTEGER DEFAULT 0,
+    diamond_blocks INTEGER DEFAULT 0,
+    diamond_items INTEGER DEFAULT 0,
+    raw_iron_blocks INTEGER DEFAULT 0,
+    raw_gold_blocks INTEGER DEFAULT 0,
+    auto_subtract INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+"""
 
 
 def init_db() -> None:
     """Initialize the database schema if it doesn't exist."""
     conn = get_connection()
     try:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS deals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                iron_ingots REAL DEFAULT 0,
-                gold_ingots REAL DEFAULT 0,
-                diamond_items REAL DEFAULT 0,
-                iron_price REAL DEFAULT 0,
-                gold_price REAL DEFAULT 0,
-                diamond_price REAL DEFAULT 0,
-                market_value REAL DEFAULT 0,
-                offered_price REAL DEFAULT 0,
-                status TEXT DEFAULT '',
-                profit REAL DEFAULT 0,
-                iron_amount REAL DEFAULT 0,
-                iron_unit TEXT DEFAULT 'ingot',
-                gold_amount REAL DEFAULT 0,
-                gold_unit TEXT DEFAULT 'ingot',
-                diamond_amount REAL DEFAULT 0,
-                diamond_unit TEXT DEFAULT 'ingot'
-            );
-
-            CREATE TABLE IF NOT EXISTS price_cache (
-                item_name TEXT PRIMARY KEY,
-                price REAL NOT NULL,
-                timestamp REAL NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS templates (
-                name TEXT PRIMARY KEY,
-                iron_ingots REAL DEFAULT 0,
-                gold_ingots REAL DEFAULT 0,
-                diamond_items REAL DEFAULT 0,
-                offered_price REAL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS price_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                iron_price REAL DEFAULT 0,
-                gold_price REAL DEFAULT 0,
-                diamond_price REAL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS item_lookup_deals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                item_name TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                unit_price REAL NOT NULL,
-                total_value REAL NOT NULL,
-                offered_price REAL NOT NULL,
-                status TEXT DEFAULT '',
-                profit REAL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS stash (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                name TEXT DEFAULT 'Default',
-                iron_blocks INTEGER DEFAULT 0,
-                iron_ingots INTEGER DEFAULT 0,
-                gold_blocks INTEGER DEFAULT 0,
-                gold_ingots INTEGER DEFAULT 0,
-                diamond_blocks INTEGER DEFAULT 0,
-                diamond_items INTEGER DEFAULT 0,
-                raw_iron_blocks INTEGER DEFAULT 0,
-                raw_gold_blocks INTEGER DEFAULT 0,
-                auto_subtract INTEGER DEFAULT 0,
-                updated_at TEXT NOT NULL
-            );
-        """)
-        conn.commit()
-        # Migration: add auto_subtract column if it doesn't exist (for databases created before v3.3)
-        try:
-            conn.execute("ALTER TABLE stash ADD COLUMN auto_subtract INTEGER DEFAULT 0")
+        if _USE_POSTGRES:
+            cursor = conn.cursor()
+            cursor.execute(_PG_SCHEMA)
             conn.commit()
-            logger.debug("Migration: added auto_subtract column to stash table.")
-        except sqlite3.OperationalError:
-            pass
-        # Migration: add raw_iron_blocks and raw_gold_blocks columns
-        try:
-            conn.execute("ALTER TABLE stash ADD COLUMN raw_iron_blocks INTEGER DEFAULT 0")
+            # Check and add missing columns in stash table for PostgreSQL
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'stash' AND column_name = 'auto_subtract'
+            """)
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE stash ADD COLUMN auto_subtract INTEGER DEFAULT 0")
+                logger.debug("Migration: added auto_subtract column.")
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'stash' AND column_name = 'raw_iron_blocks'
+            """)
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE stash ADD COLUMN raw_iron_blocks INTEGER DEFAULT 0")
+                logger.debug("Migration: added raw_iron_blocks column.")
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'stash' AND column_name = 'raw_gold_blocks'
+            """)
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE stash ADD COLUMN raw_gold_blocks INTEGER DEFAULT 0")
+                logger.debug("Migration: added raw_gold_blocks column.")
             conn.commit()
-            logger.debug("Migration: added raw_iron_blocks column to stash table.")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE stash ADD COLUMN raw_gold_blocks INTEGER DEFAULT 0")
+        else:
+            # SQLite: executescript() handles multiple statements
+            conn.executescript(_SQLITE_SCHEMA)
             conn.commit()
-            logger.debug("Migration: added raw_gold_blocks column to stash table.")
-        except sqlite3.OperationalError:
-            pass
-        logger.debug("Database initialized: %s", _settings.DB_FILE)
-    except sqlite3.Error as exc:
+            # SQLite migration (ALTER TABLE IF NOT EXISTS via try/except)
+            for col in ["auto_subtract", "raw_iron_blocks", "raw_gold_blocks"]:
+                try:
+                    conn.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
+                    conn.commit()
+                    logger.debug("Migration: added %s column.", col)
+                except sqlite3.OperationalError:
+                    pass
+
+        logger.info("Database initialized (%s).", "PostgreSQL" if _USE_POSTGRES else "SQLite")
+    except Exception as exc:
         logger.error("Failed to initialize database: %s", exc)
+        raise
     finally:
         conn.close()
 
@@ -136,7 +274,7 @@ def init_db() -> None:
 # Price cache operations
 # ---------------------------------------------------------------------------
 def load_cache() -> dict:
-    """Load cached prices from SQLite, returning an empty dict on failure."""
+    """Load cached prices from database, returning an empty dict on failure."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -144,32 +282,41 @@ def load_cache() -> dict:
         rows = cursor.fetchall()
         conn.close()
         return {
-            row["item_name"]: {
-                "price": row["price"],
-                "timestamp": row["timestamp"],
+            row["item_name"] if hasattr(row, "keys") else row[0]: {
+                "price": row["price"] if hasattr(row, "keys") else row[1],
+                "timestamp": row["timestamp"] if hasattr(row, "keys") else row[2],
             }
             for row in rows
         }
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.warning("Failed to load cache from DB: %s", exc)
         return {}
 
 
 def save_cache(cache_data: dict) -> None:
-    """Persist cached prices to SQLite."""
+    """Persist cached prices to database."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("BEGIN TRANSACTION")
         for item_name, entry in cache_data.items():
-            cursor.execute(
-                """INSERT OR REPLACE INTO price_cache (item_name, price, timestamp)
-                   VALUES (?, ?, ?)""",
-                (item_name, entry["price"], entry["timestamp"]),
-            )
+            if _USE_POSTGRES:
+                cursor.execute(
+                    """INSERT INTO price_cache (item_name, price, timestamp)
+                       VALUES (%s, %s, %s)
+                       ON CONFLICT (item_name) DO UPDATE SET
+                         price = EXCLUDED.price,
+                         timestamp = EXCLUDED.timestamp""",
+                    (item_name, entry["price"], entry["timestamp"]),
+                )
+            else:
+                cursor.execute(
+                    """INSERT OR REPLACE INTO price_cache (item_name, price, timestamp)
+                       VALUES (?, ?, ?)""",
+                    (item_name, entry["price"], entry["timestamp"]),
+                )
         conn.commit()
         conn.close()
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to save cache to DB: %s", exc)
 
 
@@ -187,18 +334,20 @@ def log_deal(
     gold_price: float = 0.0,
     diamond_price: float = 0.0,
 ) -> None:
-    """Insert a deal record into the SQLite database."""
+    """Insert a deal record into the database."""
     profit = offered_val - market_value
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = "%s" if _USE_POSTGRES else "?"
+    sql = f"""INSERT INTO deals
+           (timestamp, iron_ingots, gold_ingots, diamond_items,
+            iron_price, gold_price, diamond_price,
+            market_value, offered_price, status, profit)
+           VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """INSERT INTO deals
-               (timestamp, iron_ingots, gold_ingots, diamond_items,
-                iron_price, gold_price, diamond_price,
-                market_value, offered_price, status, profit)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            sql,
             (date_str, iron_ingots, gold_ingots, diamonds,
              iron_price, gold_price, diamond_price,
              market_value, offered_val, status, profit),
@@ -206,40 +355,40 @@ def log_deal(
         conn.commit()
         conn.close()
         logger.info("Deal logged to database: %s | %s", status, date_str)
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to log deal to database: %s", exc)
 
 
 def update_deal(deal_id: int, status: str, offered_price: float) -> bool:
     """Update a deal's status and/or offered price. Returns True on success."""
+    ph = "%s" if _USE_POSTGRES else "?"
+    sql = f"""UPDATE deals SET status = {ph}, offered_price = {ph},
+               profit = {ph} - market_value WHERE id = {ph}"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            """UPDATE deals SET status = ?, offered_price = ?,
-               profit = ? - market_value WHERE id = ?""",
-            (status, offered_price, offered_price, deal_id),
-        )
+        cursor.execute(sql, (status, offered_price, offered_price, deal_id))
         conn.commit()
         conn.close()
         logger.info("Deal %d updated: %s | $%.2f", deal_id, status, offered_price)
         return True
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to update deal %d: %s", deal_id, exc)
         return False
 
 
 def delete_deal(deal_id: int) -> bool:
     """Delete a deal by ID. Returns True on success."""
+    ph = "%s" if _USE_POSTGRES else "?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM deals WHERE id = ?", (deal_id,))
+        cursor.execute(f"DELETE FROM deals WHERE id = {ph}", (deal_id,))
         conn.commit()
         conn.close()
         logger.info("Deal %d deleted.", deal_id)
         return True
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to delete deal %d: %s", deal_id, exc)
         return False
 
@@ -250,20 +399,27 @@ def delete_deal(deal_id: int) -> bool:
 def save_template(name: str, iron_ingots: float, gold_ingots: float,
                   diamond_items: float, offered_price: float) -> bool:
     """Save a deal template. Returns True on success."""
+    if _USE_POSTGRES:
+        sql = """INSERT INTO templates (name, iron_ingots, gold_ingots, diamond_items, offered_price)
+                 VALUES (%s, %s, %s, %s, %s)
+                 ON CONFLICT (name) DO UPDATE SET
+                   iron_ingots = EXCLUDED.iron_ingots,
+                   gold_ingots = EXCLUDED.gold_ingots,
+                   diamond_items = EXCLUDED.diamond_items,
+                   offered_price = EXCLUDED.offered_price"""
+    else:
+        sql = """INSERT OR REPLACE INTO templates
+                 (name, iron_ingots, gold_ingots, diamond_items, offered_price)
+                 VALUES (?, ?, ?, ?, ?)"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            """INSERT OR REPLACE INTO templates
-               (name, iron_ingots, gold_ingots, diamond_items, offered_price)
-               VALUES (?, ?, ?, ?, ?)""",
-            (name, iron_ingots, gold_ingots, diamond_items, offered_price),
-        )
+        cursor.execute(sql, (name, iron_ingots, gold_ingots, diamond_items, offered_price))
         conn.commit()
         conn.close()
         logger.info("Template '%s' saved.", name)
         return True
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to save template: %s", exc)
         return False
 
@@ -274,25 +430,26 @@ def load_templates() -> list:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM templates ORDER BY name")
-        rows = [dict(row) for row in cursor.fetchall()]
+        rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to load templates: %s", exc)
         return []
 
 
 def delete_template(name: str) -> bool:
     """Delete a template by name. Returns True on success."""
+    ph = "%s" if _USE_POSTGRES else "?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM templates WHERE name = ?", (name,))
+        cursor.execute(f"DELETE FROM templates WHERE name = {ph}", (name,))
         conn.commit()
         conn.close()
         logger.info("Template '%s' deleted.", name)
         return True
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to delete template: %s", exc)
         return False
 
@@ -303,35 +460,38 @@ def delete_template(name: str) -> bool:
 def save_price_snapshot(iron_price: float, gold_price: float, diamond_price: float) -> None:
     """Record current prices to the price_history table."""
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = "%s" if _USE_POSTGRES else "?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """INSERT INTO price_history (timestamp, iron_price, gold_price, diamond_price)
-               VALUES (?, ?, ?, ?)""",
+            f"""INSERT INTO price_history (timestamp, iron_price, gold_price, diamond_price)
+               VALUES ({ph}, {ph}, {ph}, {ph})""",
             (date_str, iron_price, gold_price, diamond_price),
         )
         conn.commit()
         conn.close()
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to save price snapshot: %s", exc)
 
 
 def get_price_history(days: int = 30) -> list:
     """Return price history for the last N days."""
+    if _USE_POSTGRES:
+        wh = "WHERE timestamp >= (NOW() - INTERVAL '%s days')::text"
+    else:
+        wh = "WHERE timestamp >= datetime('now', '-' || ? || ' days')"
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """SELECT * FROM price_history
-               WHERE timestamp >= datetime('now', '-' || ? || ' days')
-               ORDER BY timestamp ASC""",
+            f"SELECT * FROM price_history {wh} ORDER BY timestamp ASC",
             (str(days),),
         )
-        rows = [dict(row) for row in cursor.fetchall()]
+        rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to fetch price history: %s", exc)
         return []
 
@@ -341,17 +501,18 @@ def get_price_history(days: int = 30) -> list:
 # ---------------------------------------------------------------------------
 def get_all_deals(limit: int = 100) -> list:
     """Return the most recent deals."""
+    ph = "%s" if _USE_POSTGRES else "?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM deals ORDER BY id DESC LIMIT ?",
+            f"SELECT * FROM deals ORDER BY id DESC LIMIT {ph}",
             (limit,),
         )
-        rows = [dict(row) for row in cursor.fetchall()]
+        rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to fetch deals: %s", exc)
         return []
 
@@ -364,25 +525,24 @@ def get_deal_stats() -> dict:
         cursor.execute("""
             SELECT
                 COUNT(*) AS total_deals,
-                COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%' THEN 1 ELSE 0 END), 0) AS accepted,
+                COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%%' THEN 1 ELSE 0 END), 0) AS accepted,
                 COALESCE(SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END), 0) AS rejected,
                 COALESCE(SUM(profit), 0) AS total_profit,
                 COALESCE(AVG(profit), 0) AS avg_profit,
                 COALESCE(SUM(market_value), 0) AS total_market_value
             FROM deals
         """)
-        stats = dict(cursor.fetchone())
+        row = _fetchone_as_dict(cursor)
         conn.close()
-        return stats
-    except sqlite3.Error as exc:
+        return row or {
+            "total_deals": 0, "accepted": 0, "rejected": 0,
+            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
+        }
+    except Exception as exc:
         logger.error("Failed to fetch deal stats: %s", exc)
         return {
-            "total_deals": 0,
-            "accepted": 0,
-            "rejected": 0,
-            "total_profit": 0,
-            "avg_profit": 0,
-            "total_market_value": 0,
+            "total_deals": 0, "accepted": 0, "rejected": 0,
+            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
         }
 
 
@@ -398,37 +558,39 @@ def log_item_deal(
     status: str,
     profit: float,
 ) -> None:
-    """Insert a lookup-item deal into the SQLite database."""
+    """Insert a lookup-item deal into the database."""
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ph = "%s" if _USE_POSTGRES else "?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """INSERT INTO item_lookup_deals
+            f"""INSERT INTO item_lookup_deals
                (timestamp, item_name, quantity, unit_price, total_value, offered_price, status, profit)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})""",
             (date_str, item_name, quantity, unit_price, total_value, offered_price, status, profit),
         )
         conn.commit()
         conn.close()
         logger.info("Item lookup deal logged: %s | %s | %s", item_name, status, date_str)
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to log item lookup deal: %s", exc)
 
 
 def get_item_lookup_deals(limit: int = 100) -> list:
     """Return the most recent item lookup deals."""
+    ph = "%s" if _USE_POSTGRES else "?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM item_lookup_deals ORDER BY id DESC LIMIT ?",
+            f"SELECT * FROM item_lookup_deals ORDER BY id DESC LIMIT {ph}",
             (limit,),
         )
-        rows = [dict(row) for row in cursor.fetchall()]
+        rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to fetch item lookup deals: %s", exc)
         return []
 
@@ -441,39 +603,39 @@ def get_item_lookup_stats() -> dict:
         cursor.execute("""
             SELECT
                 COUNT(*) AS total_deals,
-                COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%' THEN 1 ELSE 0 END), 0) AS accepted,
+                COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%%' THEN 1 ELSE 0 END), 0) AS accepted,
                 COALESCE(SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END), 0) AS rejected,
                 COALESCE(SUM(profit), 0) AS total_profit,
                 COALESCE(AVG(profit), 0) AS avg_profit,
                 COALESCE(SUM(total_value), 0) AS total_market_value
             FROM item_lookup_deals
         """)
-        stats = dict(cursor.fetchone())
+        row = _fetchone_as_dict(cursor)
         conn.close()
-        return stats
-    except sqlite3.Error as exc:
+        return row or {
+            "total_deals": 0, "accepted": 0, "rejected": 0,
+            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
+        }
+    except Exception as exc:
         logger.error("Failed to fetch item lookup stats: %s", exc)
         return {
-            "total_deals": 0,
-            "accepted": 0,
-            "rejected": 0,
-            "total_profit": 0,
-            "avg_profit": 0,
-            "total_market_value": 0,
+            "total_deals": 0, "accepted": 0, "rejected": 0,
+            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
         }
 
 
 def delete_item_lookup_deal(deal_id: int) -> bool:
     """Delete an item lookup deal by ID. Returns True on success."""
+    ph = "%s" if _USE_POSTGRES else "?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM item_lookup_deals WHERE id = ?", (deal_id,))
+        cursor.execute(f"DELETE FROM item_lookup_deals WHERE id = {ph}", (deal_id,))
         conn.commit()
         conn.close()
         logger.info("Item lookup deal %d deleted.", deal_id)
         return True
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to delete item lookup deal %d: %s", deal_id, exc)
         return False
 
@@ -496,22 +658,22 @@ DEFAULT_STASH = {
     "updated_at": "never",
 }
 
+
 def load_stash() -> dict:
     """Load the current stash from the database. Returns default values if none exists."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM stash WHERE id = 1")
-        row = cursor.fetchone()
+        row = _fetchone_as_dict(cursor)
         conn.close()
         if row:
-            stash = dict(row)
             # Ensure new fields exist (databases created before the migration)
-            stash.setdefault("raw_iron_blocks", 0)
-            stash.setdefault("raw_gold_blocks", 0)
-            return stash
+            row.setdefault("raw_iron_blocks", 0)
+            row.setdefault("raw_gold_blocks", 0)
+            return row
         return dict(DEFAULT_STASH)
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.warning("Failed to load stash from DB: %s", exc)
         return dict(DEFAULT_STASH)
 
@@ -519,15 +681,35 @@ def load_stash() -> dict:
 def save_stash(data: dict) -> None:
     """Insert or replace the stash row with the given data."""
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if _USE_POSTGRES:
+        sql = """INSERT INTO stash
+               (id, name, iron_blocks, iron_ingots, gold_blocks, gold_ingots,
+                diamond_blocks, diamond_items, raw_iron_blocks, raw_gold_blocks,
+                auto_subtract, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                 name = EXCLUDED.name,
+                 iron_blocks = EXCLUDED.iron_blocks,
+                 iron_ingots = EXCLUDED.iron_ingots,
+                 gold_blocks = EXCLUDED.gold_blocks,
+                 gold_ingots = EXCLUDED.gold_ingots,
+                 diamond_blocks = EXCLUDED.diamond_blocks,
+                 diamond_items = EXCLUDED.diamond_items,
+                 raw_iron_blocks = EXCLUDED.raw_iron_blocks,
+                 raw_gold_blocks = EXCLUDED.raw_gold_blocks,
+                 auto_subtract = EXCLUDED.auto_subtract,
+                 updated_at = EXCLUDED.updated_at"""
+    else:
+        sql = """INSERT OR REPLACE INTO stash
+               (id, name, iron_blocks, iron_ingots, gold_blocks, gold_ingots,
+                diamond_blocks, diamond_items, raw_iron_blocks, raw_gold_blocks,
+                auto_subtract, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """INSERT OR REPLACE INTO stash
-               (id, name, iron_blocks, iron_ingots, gold_blocks, gold_ingots,
-                diamond_blocks, diamond_items, raw_iron_blocks, raw_gold_blocks,
-                auto_subtract, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            sql,
             (
                 1,
                 data.get("name", "Default"),
@@ -546,7 +728,7 @@ def save_stash(data: dict) -> None:
         conn.commit()
         conn.close()
         logger.info("Stash saved to database.")
-    except sqlite3.Error as exc:
+    except Exception as exc:
         logger.error("Failed to save stash to database: %s", exc)
 
 
@@ -598,7 +780,6 @@ def import_items_to_stash(raw_text: str) -> tuple[dict, list[str], list[str]]:
             continue
 
         # Strip game log prefix: "[timestamp] [thread/LEVEL]: [CHAT] " or similar
-        # This removes everything up to and including "[CHAT] " if present
         clean = re.sub(r'^\[.*?\]\s*\[.*?\]\s*:\s*\[CHAT\]\s*', '', line)
         # Also handle lines without [CHAT] but with timestamps like "[timestamp] text: count"
         clean = re.sub(r'^\[.*?\]\s*', '', clean)
@@ -622,7 +803,6 @@ def import_items_to_stash(raw_text: str) -> tuple[dict, list[str], list[str]]:
             continue
 
         # Apply any factor (e.g. nugget -> ingot conversion)
-        # Check if item name ends with a known suffix
         for suffix, factor in _settings.IMPORT_ITEM_FACTORS.items():
             if item_name.lower().endswith(suffix.lower()):
                 count = int(count * factor)
@@ -670,14 +850,7 @@ def subtract_from_stash(
     subtracted from ingots. Allows negative results (overdraft).
 
     Returns a dict describing what was subtracted:
-    {
-        "iron_blocks": int,
-        "iron_ingots": int,
-        "gold_blocks": int,
-        "gold_ingots": int,
-        "diamond_blocks": int,
-        "diamond_items": int,
-    }
+    { "iron_blocks": int, "iron_ingots": int, ... }
     """
     stash = load_stash()
 
@@ -687,50 +860,31 @@ def subtract_from_stash(
         total_ingot_amount: int,
         ingots_per_block: int,
     ) -> tuple:
-        """
-        Subtract total_ingot_amount from stash_blocks/stash_ingots.
-        Returns (new_blocks, new_ingots, blocks_used, ingots_used).
-        Blocks are consumed first; shortfall comes from ingots.
-        """
         total_available = stash_blocks * ingots_per_block + stash_ingots
         amount = total_ingot_amount
-
-        # How many full blocks can we deduct?
         blocks_to_use = min(stash_blocks, amount // ingots_per_block)
         remaining = amount - (blocks_to_use * ingots_per_block)
-
-        # The rest comes from ingots
         ingots_to_use = min(stash_ingots, remaining)
         remaining -= ingots_to_use
-
-        # If still remaining after exhausting stash, allow negative (overdraft)
         if remaining > 0:
-            ingots_to_use += remaining  # pushes ingots negative
-
+            ingots_to_use += remaining
         new_blocks = stash_blocks - blocks_to_use
         new_ingots = stash_ingots - ingots_to_use
-
         return new_blocks, new_ingots, blocks_to_use, ingots_to_use
 
-    # Iron
     new_ir_b, new_ir_i, ir_b_used, ir_i_used = _subtract_material(
         stash["iron_blocks"], stash["iron_ingots"],
         int(iron_ingots), _settings.INGOTS_PER_BLOCK,
     )
-
-    # Gold
     new_go_b, new_go_i, go_b_used, go_i_used = _subtract_material(
         stash["gold_blocks"], stash["gold_ingots"],
         int(gold_ingots), _settings.INGOTS_PER_BLOCK,
     )
-
-    # Diamond (same logic: blocks = 9 items per block)
     new_di_b, new_di_i, di_b_used, di_i_used = _subtract_material(
         stash["diamond_blocks"], stash["diamond_items"],
         int(diamond_items), _settings.INGOTS_PER_BLOCK,
     )
 
-    # Save updated stash
     stash["iron_blocks"] = new_ir_b
     stash["iron_ingots"] = new_ir_i
     stash["gold_blocks"] = new_go_b
