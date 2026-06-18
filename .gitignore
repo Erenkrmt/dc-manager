@@ -1,10 +1,73 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# =============================================================================
+# .gitignore – DC Trade Toolbox
+# =============================================================================
 
-# Virtual environments
-.venv
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+wheels/
+*.whl
+.eggs/
+MANIFEST
+*.manifest
+*.spec
+
+# ── Virtual environments ────────────────────────────────────────────────
+.venv/
+venv/
+env/
+virtualenv/
+*.venv
+
+# ── Local data (SQLite DB) ──────────────────────────────────────────────
+# The SQLite database is generated on first run.
+# Keep it local – don't commit your personal trade data!
+data/dc_trade.db
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Environment & secrets ───────────────────────────────────────────────
+.env
+.env.local
+*.env.local
+
+# ── IDE / Editor ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Docker ──────────────────────────────────────────────────────────────
+.docker/
+docker-compose.override.yml
+
+# ── Testing ─────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+*.cover
+*.py,cover
+
+# ── Logs ────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# ── Project-specific cache ──────────────────────────────────────────────
+prices_cache.json
+deals_log.csv
