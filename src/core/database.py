@@ -8,12 +8,17 @@ Multi-company: most queries are scoped by company_id.
 import os
 import logging
 import secrets
+import hashlib
 from datetime import datetime
 from typing import Optional, Union, Any
 
 from src.core.settings import get_settings
 
 _settings = get_settings()
+
+# ── Allowed column names for safe dynamic migration queries ──
+_ALLOWED_STASH_COLUMNS = frozenset({"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"})
+_ALLOWED_COMPANY_COLUMNS = frozenset({"session_token", "tier"})
 
 logger = logging.getLogger(__name__)
 
@@ -295,59 +300,85 @@ def init_db() -> None:
 
 
 def _run_pg_migrations(cursor, conn) -> None:
-    """PostgreSQL-specific column additions (mirrors init_db)."""
+    """PostgreSQL-specific column additions — safe dynamic SQL with allowlist."""
     from psycopg2 import sql as pgsql
+    # Allowed column names — validated against allowlist to prevent SQL injection
     for col in ["auto_subtract", "raw_iron_blocks", "raw_gold_blocks"]:
-        cursor.execute(f"""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'stash' AND column_name = '{col}'
-        """)
+        if col not in _ALLOWED_STASH_COLUMNS:
+            logger.warning("Skipping disallowed column '%s' in PG migration.", col)
+            continue
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'stash' AND column_name = %s",
+            (col,),
+        )
         if cursor.fetchone() is None:
             cursor.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
             logger.debug("Migration: added %s column.", col)
-    # tier column for companies table
-    cursor.execute("""
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'companies' AND column_name = 'tier'
-    """)
-    if cursor.fetchone() is None:
-        cursor.execute("ALTER TABLE companies ADD COLUMN tier TEXT DEFAULT 'free'")
-        logger.debug("Migration: added tier column to companies table.")
+    for col in ["tier"]:
+        if col not in _ALLOWED_COMPANY_COLUMNS:
+            logger.warning("Skipping disallowed column '%s' in PG migration.", col)
+            continue
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'companies' AND column_name = %s",
+            (col,),
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT 'free'")
+            logger.debug("Migration: added %s column to companies table.", col)
     conn.commit()
 
 
 def _run_sqlite_migrations(conn) -> None:
-    """SQLite-specific column additions (mirrors init_db)."""
+    """SQLite-specific column additions — safe dynamic SQL with allowlist."""
     for col in ["auto_subtract", "raw_iron_blocks", "raw_gold_blocks"]:
+        if col not in _ALLOWED_STASH_COLUMNS:
+            logger.warning("Skipping disallowed column '%s' in SQLite migration.", col)
+            continue
         try:
             conn.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
             conn.commit()
             logger.debug("Migration: added %s column.", col)
         except sqlite3.OperationalError:
             pass
-    # session_token column for companies table
-    try:
-        conn.execute("ALTER TABLE companies ADD COLUMN session_token TEXT DEFAULT ''")
-        conn.commit()
-        logger.debug("Migration: added session_token column to companies table.")
-    except sqlite3.OperationalError:
-        pass
-    # tier column for companies table
-    try:
-        conn.execute("ALTER TABLE companies ADD COLUMN tier TEXT DEFAULT 'free'")
-        conn.commit()
-        logger.debug("Migration: added tier column to companies table.")
-    except sqlite3.OperationalError:
-        pass
+    for col in ["session_token", "tier"]:
+        if col not in _ALLOWED_COMPANY_COLUMNS:
+            logger.warning("Skipping disallowed column '%s' in SQLite migration.", col)
+            continue
+        try:
+            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT ''")
+            conn.commit()
+            logger.debug("Migration: added %s column to companies table.", col)
+        except sqlite3.OperationalError:
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Company management
 # ═══════════════════════════════════════════════════════════════════════════
 
+
+def _hash_api_key(raw_key: str) -> str:
+    """Hash an API key with SHA-256 so it's never stored in plaintext."""
+    salt = secrets.token_hex(8)
+    hashed = hashlib.sha256(f"{salt}:{raw_key}".encode()).hexdigest()
+    return f"{salt}:{hashed}"
+
+
+def _check_api_key(raw_key: str, stored_hash: str) -> bool:
+    """Check a raw API key against the stored hash (salt:hex format)."""
+    if ":" not in stored_hash:
+        return False
+    salt, expected_hash = stored_hash.split(":", 1)
+    actual_hash = hashlib.sha256(f"{salt}:{raw_key}".encode()).hexdigest()
+    return actual_hash == expected_hash
+
+
 def _generate_api_key() -> str:
     """Generate a short API key in the format dc_XXXXX."""
-    return f"{_settings.API_KEY_PREFIX}{secrets.token_hex(8)}"
+    raw_key = f"{_settings.API_KEY_PREFIX}{secrets.token_hex(8)}"
+    return raw_key
 
 
 def get_or_create_company_by_discord(
@@ -390,7 +421,8 @@ def get_or_create_company_by_discord(
             return company
 
         # Create new company with trial
-        api_key = _generate_api_key()
+        raw_api_key = _generate_api_key()
+        hashed_api_key = _hash_api_key(raw_api_key)
         trial_end = None
         if _settings.TRIAL_DAYS > 0:
             from datetime import timedelta
@@ -402,7 +434,7 @@ def get_or_create_company_by_discord(
                                           company_name, access_expires_at, is_active, trial_used,
                                           created_at, updated_at)
                    VALUES (%s, %s, %s, %s, %s, %s, 1, 1, %s, %s)""",
-                (discord_id, discord_username, discord_avatar, api_key, "", trial_end, now, now),
+                (discord_id, discord_username, discord_avatar, hashed_api_key, "", trial_end, now, now),
             )
         else:
             cursor.execute(
@@ -410,7 +442,7 @@ def get_or_create_company_by_discord(
                                           company_name, access_expires_at, is_active, trial_used,
                                           created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)""",
-                (discord_id, discord_username, discord_avatar, api_key, "", trial_end, now, now),
+                (discord_id, discord_username, discord_avatar, hashed_api_key, "", trial_end, now, now),
             )
         conn.commit()
 
@@ -431,18 +463,18 @@ def get_or_create_company_by_discord(
 
 
 def get_company_by_api_key(api_key: str) -> Optional[dict]:
-    """Look up a company by API key. Returns None if not found or inactive."""
-    ph = _ph()
+    """Look up a company by hashed API key. Iterates all active companies and checks hash."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            f"SELECT * FROM companies WHERE api_key = {ph} AND is_active = 1",
-            (api_key,),
-        )
-        row = _fetchone_as_dict(cursor)
+        cursor.execute("SELECT * FROM companies WHERE is_active = 1")
+        for row in cursor.fetchall():
+            stored_hash = dict(row).get("api_key", "")
+            if _check_api_key(api_key, stored_hash):
+                conn.close()
+                return dict(row)
         conn.close()
-        return row
+        return None
     except Exception as exc:
         logger.error("Failed to lookup company by API key: %s", exc)
         return None
@@ -527,21 +559,22 @@ def update_company_name(company_id: int, name: str) -> bool:
 
 
 def regenerate_api_key(company_id: int) -> Optional[str]:
-    """Generate a new API key for a company. Returns the new key."""
+    """Generate a new API key for a company. Returns the new key. Stores only the hash in DB."""
     ph = _ph()
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    new_key = _generate_api_key()
+    raw_key = _generate_api_key()
+    hashed_key = _hash_api_key(raw_key)
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
             f"UPDATE companies SET api_key = {ph}, updated_at = {ph} WHERE id = {ph}",
-            (new_key, now, company_id),
+            (hashed_key, now, company_id),
         )
         conn.commit()
         conn.close()
         logger.info("API key regenerated for company %d", company_id)
-        return new_key
+        return raw_key
     except Exception as exc:
         logger.error("Failed to regenerate API key: %s", exc)
         return None
