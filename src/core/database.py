@@ -38,9 +38,13 @@ else:
 def get_connection():
     """Create and return a database connection (SQLite or PostgreSQL)."""
     if _USE_POSTGRES:
+        # Only require SSL when connecting to a remote host (Cloud SQL, etc.)
+        # For local Docker PostgreSQL (hostname "postgres" or "localhost"), skip SSL
+        _host = _settings.DATABASE_URL.split("@")[-1].split(":")[0]
+        _sslmode = "require" if _host not in ("postgres", "localhost", "127.0.0.1") else "disable"
         conn = psycopg2.connect(
             _settings.DATABASE_URL,
-            sslmode="require",
+            sslmode=_sslmode,
             cursor_factory=psycopg2.extras.RealDictCursor,
         )
         conn.autocommit = False
@@ -91,6 +95,7 @@ CREATE TABLE IF NOT EXISTS companies (
     access_expires_at TEXT,
     is_active INTEGER DEFAULT 1,
     trial_used INTEGER DEFAULT 0,
+    tier TEXT DEFAULT 'free',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -183,6 +188,7 @@ CREATE TABLE IF NOT EXISTS companies (
     access_expires_at TEXT,
     is_active INTEGER DEFAULT 1,
     trial_used INTEGER DEFAULT 0,
+    tier TEXT DEFAULT 'free',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -299,6 +305,14 @@ def _run_pg_migrations(cursor, conn) -> None:
         if cursor.fetchone() is None:
             cursor.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
             logger.debug("Migration: added %s column.", col)
+    # tier column for companies table
+    cursor.execute("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'companies' AND column_name = 'tier'
+    """)
+    if cursor.fetchone() is None:
+        cursor.execute("ALTER TABLE companies ADD COLUMN tier TEXT DEFAULT 'free'")
+        logger.debug("Migration: added tier column to companies table.")
     conn.commit()
 
 
@@ -316,6 +330,13 @@ def _run_sqlite_migrations(conn) -> None:
         conn.execute("ALTER TABLE companies ADD COLUMN session_token TEXT DEFAULT ''")
         conn.commit()
         logger.debug("Migration: added session_token column to companies table.")
+    except sqlite3.OperationalError:
+        pass
+    # tier column for companies table
+    try:
+        conn.execute("ALTER TABLE companies ADD COLUMN tier TEXT DEFAULT 'free'")
+        conn.commit()
+        logger.debug("Migration: added tier column to companies table.")
     except sqlite3.OperationalError:
         pass
 
@@ -568,6 +589,34 @@ def check_company_access(company_id: int) -> tuple[bool, bool]:
         return True, False  # active and not expired = full access
     except (ValueError, TypeError):
         return True, False
+
+
+def get_company_tier(company_id: int) -> str:
+    """Return the tier of a company ('free' or 'premium')."""
+    company = get_company_by_id(company_id)
+    if company:
+        return company.get("tier", "free")
+    return "free"
+
+
+def set_company_tier(company_id: int, tier: str) -> bool:
+    """Set a company's tier ('free' or 'premium'). Returns True on success."""
+    ph = _ph()
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE companies SET tier = {ph}, updated_at = {ph} WHERE id = {ph}",
+            (tier, now, company_id),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Company %d tier set to '%s'.", company_id, tier)
+        return True
+    except Exception as exc:
+        logger.error("Failed to set company tier: %s", exc)
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════

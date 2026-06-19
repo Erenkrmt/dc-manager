@@ -400,18 +400,24 @@ if st.session_state.is_read_only:
     st.sidebar.warning("🔒 **Read-only**")
 st.sidebar.markdown("---")
 
-# Navigation — admin gets extra pages
+# Navigation — admin gets extra pages; free tier gets limited features
+_company_tier = db.get_company_tier(company_id)
+_is_premium = _company_tier == "premium" or st.session_state.is_admin
+
 nav_pages = [
     "💰 Deal Calculator",
-    "📦 Shulker Scanner",
     "⚡ Quick Converter",
     "📊 Deal History",
-    "📦 Stash Manager",
-    "📋 Deal Templates",
-    "🔍 Item Lookup",
-    "📈 Price History",
-    "👤 My Profile",
 ]
+if _is_premium:
+    nav_pages += [
+        "📦 Shulker Scanner",
+        "📦 Stash Manager",
+        "📋 Deal Templates",
+        "🔍 Item Lookup",
+        "📈 Price History",
+    ]
+nav_pages.append("👤 My Profile")
 if st.session_state.is_admin:
     nav_pages.append("🏢 Company Management")
 
@@ -659,17 +665,35 @@ if page == "🏢 Company Management":
         st.stop()
 
     df = pd.DataFrame(companies)
-    display_cols = ["id", "discord_username", "company_name", "access_expires_at", "is_active", "trial_used"]
+    display_cols = ["id", "discord_username", "company_name", "tier", "access_expires_at", "is_active", "trial_used"]
     df_display = df[[c for c in display_cols if c in df.columns]]
     df_display = df_display.rename(columns={
         "id": "ID",
         "discord_username": "Discord",
         "company_name": "Company Name",
+        "tier": "Tier",
         "access_expires_at": "Access Expires",
         "is_active": "Active",
         "trial_used": "Trial Used",
     })
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.subheader("⭐ Set Company Tier")
+    tier_id = st.number_input("Company ID to change tier:", min_value=1, step=1, value=1, key="tier_id")
+    target_company = db.get_company_by_id(tier_id)
+    if target_company:
+        current_tier = target_company.get("tier", "free")
+        st.write(f"Current tier: **{current_tier}**")
+        new_tier = st.selectbox("New tier:", ["free", "premium"], index=0 if current_tier == "free" else 1, key="tier_select")
+        if st.button("⭐ Set Tier", type="primary", use_container_width=True):
+            if db.set_company_tier(tier_id, new_tier):
+                st.success(f"✅ Company #{tier_id} tier set to '{new_tier}'!")
+                st.rerun()
+            else:
+                st.error("Failed to set tier.")
+    else:
+        st.warning("Company not found.")
 
     st.markdown("---")
     st.subheader("🔍 View Company Data")

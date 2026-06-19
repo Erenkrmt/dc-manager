@@ -27,6 +27,7 @@ class Company(Base):
     access_expires_at = Column(Text, nullable=True)  # NULL = never expires
     is_active = Column(Integer, default=1)
     trial_used = Column(Integer, default=0)
+    tier = Column(Text, default="free")  # "free" or "premium"
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
 
