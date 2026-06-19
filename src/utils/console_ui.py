@@ -1,8 +1,11 @@
 # src/utils/console_ui.py
 import os
 import sys
+import json
 import logging
-from src.core.market_deal import MarketDeal
+from pathlib import Path
+
+from src.core.market_deal import MarketDeal, analyze_deal, stash_ingot_equivalents, format_subtract_result, handle_stash_subtraction, fetch_live_prices
 from src.core.settings import get_settings
 from src.core import database as db
 
@@ -76,50 +79,40 @@ def _offer_stash_subtraction(iron_ingots: int, gold_ingots: int, diamond_items: 
     After a deal, offer to subtract materials from stash.
     If auto-subtract is ON, do it silently. Otherwise ask.
     """
-    total = iron_ingots + gold_ingots + diamond_items
-    if total == 0:
+    global _COMPANY_ID
+
+    result = handle_stash_subtraction(
+        iron_ingots, gold_ingots, diamond_items,
+        company_id=_COMPANY_ID,
+    )
+    if result is None:
         return
 
-    auto_sub = db.get_auto_subtract()
+    if "pending" in result:
+        # Not auto – ask user
+        if used_stash:
+            default_choice = "y"
+            prompt_str = "Subtract these materials from stash? (Y/n): "
+        else:
+            default_choice = "n"
+            prompt_str = "Subtract these materials from stash? (y/N): "
 
-    if auto_sub:
-        result = db.subtract_from_stash(iron_ingots, gold_ingots, diamond_items)
-        parts = []
-        if result["iron_blocks"] or result["iron_ingots"]:
-            parts.append(f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots")
-        if result["gold_blocks"] or result["gold_ingots"]:
-            parts.append(f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots")
-        if result["diamond_blocks"] or result["diamond_items"]:
-            parts.append(f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items")
-        if parts:
-            print(f"📦 Auto-subtracted from stash: {', '.join(parts)}")
+        choice = input(f"\n{prompt_str}").strip().lower()
+        if choice == "":
+            choice = default_choice
+
+        if choice == "y":
+            result = db.subtract_from_stash(iron_ingots, gold_ingots, diamond_items, company_id=_COMPANY_ID)
+            formatted = format_subtract_result(result)
+            if formatted:
+                print(f"✅ Subtracted from stash: {formatted}")
+        else:
+            print("⏩ Stash unchanged.")
         return
 
-    # Not auto – ask
-    if used_stash:
-        default_choice = "y"
-        prompt_str = "Subtract these materials from stash? (Y/n): "
-    else:
-        default_choice = "n"
-        prompt_str = "Subtract these materials from stash? (y/N): "
-
-    choice = input(f"\n{prompt_str}").strip().lower()
-    if choice == "":
-        choice = default_choice
-
-    if choice == "y":
-        result = db.subtract_from_stash(iron_ingots, gold_ingots, diamond_items)
-        parts = []
-        if result["iron_blocks"] or result["iron_ingots"]:
-            parts.append(f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots")
-        if result["gold_blocks"] or result["gold_ingots"]:
-            parts.append(f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots")
-        if result["diamond_blocks"] or result["diamond_items"]:
-            parts.append(f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items")
-        if parts:
-            print(f"✅ Subtracted from stash: {', '.join(parts)}")
-    else:
-        print("⏩ Stash unchanged.")
+    formatted = format_subtract_result(result)
+    if formatted:
+        print(f"📦 Auto-subtracted from stash: {formatted}")
 
 
 # ---------------------------------------------------------------------------
@@ -137,12 +130,10 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
 
     load_stash_choice = input("\nLoad values from stash? (y/n): ").strip().lower()
     if load_stash_choice == "y":
-        stash = db.load_stash()
+        stash = db.load_stash(company_id=_COMPANY_ID)
         if stash and stash.get("updated_at") != "never":
             used_stash = True
-            total_iron = stash["iron_blocks"] * INGOTS_PER_BLOCK + stash["iron_ingots"]
-            total_gold = stash["gold_blocks"] * INGOTS_PER_BLOCK + stash["gold_ingots"]
-            total_diamond = stash["diamond_blocks"] * INGOTS_PER_BLOCK + stash["diamond_items"]
+            total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
             print(f"\n📦 Loaded from stash:")
             print(f"   Iron:     {MarketDeal.format_bulk_storage(total_iron)}")
             print(f"   Gold:     {MarketDeal.format_bulk_storage(total_gold)}")
@@ -226,12 +217,9 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
 
     load_stash_choice = input("\nLoad values from stash? (y/n): ").strip().lower()
     if load_stash_choice == "y":
-        stash = db.load_stash()
-        if stash and stash.get("updated_at") != "never" and (
-            stash["iron_blocks"] or stash["iron_ingots"] or
-            stash["gold_blocks"] or stash["gold_ingots"] or
-            stash["diamond_blocks"] or stash["diamond_items"]
-        ):
+        stash = db.load_stash(company_id=_COMPANY_ID)
+        total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
+        if stash and stash.get("updated_at") != "never" and (total_iron or total_gold or total_diamond):
             used_stash = True
             print(f"\n📦 Loaded from stash (you can override individual values):")
 
@@ -326,6 +314,8 @@ def _calculate_and_show_result(
     Compute the market value, compare against the user's offered price,
     display the result, and log the deal to CSV.
     """
+
+    # Intermediate summary before asking offered price
     total_market_value = (
         (iron_ingots * price_iron)
         + (gold_ingots * price_gold)
@@ -333,7 +323,6 @@ def _calculate_and_show_result(
     )
     min_needed_price = total_market_value * MarketDeal.MIN_ACCEPTABLE_PERCENT
 
-    # Intermediate summary
     print("\n" + "-" * 40)
     print(f"📊 INTERIM TOTAL (Market Value): {total_market_value:.2f}$")
     print(f"📉 Your Minimum (incl. discount): {min_needed_price:.2f}$")
@@ -341,33 +330,12 @@ def _calculate_and_show_result(
 
     offered_price = safe_float_input("\nWhat is the buyer offering for these goods? ($): ")
 
-    percent_of_market = (
-        (offered_price / total_market_value) * 100 if total_market_value > 0 else 0
+    # Use the shared analyze_deal function
+    result = analyze_deal(
+        iron_ingots, gold_ingots, diamond_items,
+        price_iron, price_gold, price_diamond,
+        offered_price=offered_price,
     )
-    profit_loss = offered_price - total_market_value
-
-    stacks = (iron_ingots + gold_ingots + diamond_items) / float(ITEMS_PER_STACK)
-    shulkers = (iron_ingots + gold_ingots + diamond_items) / float(ITEMS_PER_SHULKER)
-
-    # Determine deal status
-    if offered_price >= total_market_value:
-        status = "ACCEPTED (PROFIT)"
-        status_emoji = "🟩"
-        status_msg = f"SUPER DEAL! +{profit_loss:.2f}$ profit over market price."
-    elif offered_price >= min_needed_price:
-        status = "ACCEPTED (BULK)"
-        status_emoji = "🟨"
-        status_msg = (
-            f"OK! Within bulk discount range "
-            f"(discount: {abs(profit_loss):.2f}$)"
-        )
-    else:
-        status = "REJECTED"
-        status_emoji = "🟥"
-        status_msg = (
-            f"TOO CHEAP! You are missing "
-            f"{min_needed_price - offered_price:.2f}$ to reach your limit."
-        )
 
     # Output
     print("\n" + "=" * 60)
@@ -383,43 +351,41 @@ def _calculate_and_show_result(
     print(f"📦 Gold total:      {MarketDeal.format_bulk_storage(gold_ingots)}")
     print(f"📦 Diamond total:   {MarketDeal.format_bulk_storage(diamond_items, is_diamond=True)}")
     print(
-        f"🚚 Shipping volume: ~{stacks:.1f} stacks "
-        f"({shulkers:.2f} shulker boxes)"
+        f"🚚 Shipping volume: ~{result['stacks']:.1f} stacks "
+        f"({result['shulkers']:.2f} shulker boxes)"
     )
 
-    if stacks > 0:
-        print(f"📊 Margin:          {profit_loss / stacks:.2f}$ per stack | {profit_loss / shulkers:.2f}$ per shulker")
+    if result['stacks'] > 0:
+        print(f"📊 Margin:          {result['profit_loss'] / result['stacks']:.2f}$ per stack | {result['profit_loss'] / result['shulkers']:.2f}$ per shulker")
 
     print("\n== FINANCIAL CHECK ==")
-    print(f"Market value:    {total_market_value:.2f}$")
-    print(f"Offered price:   {offered_price:.2f}$ ({percent_of_market:.1f}% of market)")
-    print(f"Your limit ({MarketDeal.MIN_ACCEPTABLE_PERCENT * 100:.0f}%): {min_needed_price:.2f}$")
+    print(f"Market value:    {result['market_value']:.2f}$")
+    print(f"Offered price:   {result['offered_price']:.2f}$ ({result['percent_of_market']:.1f}% of market)")
+    print(f"Your limit ({MarketDeal.MIN_ACCEPTABLE_PERCENT * 100:.0f}%): {result['min_needed_price']:.2f}$")
     print("-" * 40)
-    print(f"{status_emoji} {status}")
-    print(f"   {status_msg}")
+    print(f"{result['status_emoji']} {result['status']}")
+    print(f"   {result['status_msg']}")
 
     # Smart counter-offer logic on rejection
-    if status == "REJECTED":
-        diamond_value = diamond_items * price_diamond
-        remaining_budget = offered_price - diamond_value
-        total_metals = iron_ingots + gold_ingots
-
-        if total_metals > 0 and remaining_budget > 0:
-            ratio = iron_ingots / total_metals
-            fair_metals = remaining_budget / ((ratio * price_iron) + ((1 - ratio) * price_gold))
-
-            print("\n💡 COUNTER-OFFER SUGGESTION:")
-            print(f"For ${offered_price:.0f}, offer instead just the following:")
-            if iron_ingots > 0: print(f" -> Iron:      {MarketDeal.format_bulk_storage(fair_metals * ratio)}")
-            if gold_ingots > 0: print(f" -> Gold:      {MarketDeal.format_bulk_storage(fair_metals * (1 - ratio))}")
-            if diamond_items > 0: print(f" -> Diamonds:  {MarketDeal.format_bulk_storage(diamond_items, is_diamond=True)} (unchanged)")
-        elif remaining_budget <= 0 and total_market_value > 0:
+    if result['status'] == "REJECTED":
+        counter = result.get("counter_offer")
+        if counter is None:
             print("\n💡 COUNTER-OFFER NOT POSSIBLE: The offer doesn't even cover the diamond value!")
+        elif counter:
+            print("\n💡 COUNTER-OFFER SUGGESTION:")
+            print(f"For ${result['offered_price']:.0f}, offer instead just the following:")
+            if result['iron_ingots'] > 0:
+                print(f" -> Iron:      {MarketDeal.format_bulk_storage(counter['iron'])}")
+            if result['gold_ingots'] > 0:
+                print(f" -> Gold:      {MarketDeal.format_bulk_storage(counter['gold'])}")
+            if result['diamond_items'] > 0:
+                print(f" -> Diamonds:  {MarketDeal.format_bulk_storage(counter['diamond'], is_diamond=True)} (unchanged)")
 
     MarketDeal.log_deal(
         iron_ingots, gold_ingots, diamond_items,
-        total_market_value, offered_price, status,
+        result['market_value'], offered_price, result['status'],
         price_iron, price_gold, price_diamond,
+        company_id=_COMPANY_ID,
     )
     print(f"\n💾 Deal saved to database ({_settings.DB_FILE}).")
     print("=" * 60)
@@ -482,12 +448,11 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
         print("=" * 50)
         print("     📦 STASH MANAGER")
         print("=" * 50)
-        stash = db.load_stash()
-
-        # Calculate ingot equivalents for display
-        total_iron = stash["iron_blocks"] * INGOTS_PER_BLOCK + stash["iron_ingots"]
-        total_gold = stash["gold_blocks"] * INGOTS_PER_BLOCK + stash["gold_ingots"]
-        total_diamond = stash["diamond_blocks"] * INGOTS_PER_BLOCK + stash["diamond_items"]
+        stash = db.load_stash(company_id=_COMPANY_ID)
+        # Calculate ingot totals for display
+        total_iron = stash.get("iron_blocks", 0) * INGOTS_PER_BLOCK + stash.get("iron_ingots", 0)
+        total_gold = stash.get("gold_blocks", 0) * INGOTS_PER_BLOCK + stash.get("gold_ingots", 0)
+        total_diamond = stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK + stash.get("diamond_items", 0)
 
         # Market value
         iron_value = total_iron * price_iron
@@ -542,19 +507,19 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
                 "diamond_items": diamond_items,
                 "auto_subtract": 1 if auto_sub else 0,
             }
-            db.save_stash(new_stash)
+            db.save_stash(new_stash, company_id=_COMPANY_ID)
             print("\n✅ Stash updated!")
 
         elif choice == "2":
             confirm = input("Are you sure you want to clear the stash? (y/n): ").strip().lower()
             if confirm == "y":
-                db.clear_stash()
+                db.clear_stash(company_id=_COMPANY_ID)
                 print("\n✅ Stash cleared!")
             else:
                 print("\n⏩ Canceled.")
 
         elif choice == "3":
-            db.set_auto_subtract(not auto_sub)
+            db.set_auto_subtract(not auto_sub, company_id=_COMPANY_ID)
             print(f"\nAuto-subtract is now {'ON ✅' if not auto_sub else 'OFF ❌'}")
 
         elif choice == "4":
@@ -566,11 +531,88 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
             press_enter_to_continue()
 
 
+# ── CLI Config (API key persistence) ──────────────────────────────────────
+
+_CONFIG_FILE = Path.home() / ".dc_trade_config"
+
+
+def _load_config() -> dict:
+    """Load CLI config from ~/.dc_trade_config."""
+    try:
+        if _CONFIG_FILE.exists():
+            return json.loads(_CONFIG_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _save_config(config: dict) -> None:
+    """Save CLI config to ~/.dc_trade_config with restricted permissions."""
+    try:
+        _CONFIG_FILE.write_text(json.dumps(config, indent=2))
+        os.chmod(_CONFIG_FILE, 0o600)
+    except OSError as exc:
+        logger.warning("Could not save config: %s", exc)
+
+
+def _resolve_company() -> int | None:
+    """
+    Prompt for API key (or load from config), validate, set company_id.
+    Returns company_id or None if not authenticated.
+    Also sets is_read_only state.
+    """
+    config = _load_config()
+    api_key = config.get("api_key", "")
+
+    if not api_key:
+        print("\n🔑 Enter your API key to authenticate with the server.")
+        print("  (Get your key from the web UI → My API Key)")
+        api_key = input("API Key: ").strip()
+
+    company = db.get_company_by_api_key(api_key)
+    if not company:
+        print("\n❌ Invalid API key. Please check your key and try again.")
+        return None
+
+    # Save to config for next time
+    config["api_key"] = api_key
+    _save_config(config)
+
+    global _COMPANY_ID, _IS_READ_ONLY
+    _COMPANY_ID = company["id"]
+    is_active, is_read_only = db.check_company_access(_COMPANY_ID)
+    _IS_READ_ONLY = is_read_only
+
+    if not is_active:
+        print("\n❌ Your account is inactive. Contact the admin.")
+        return None
+
+    print(f"\n✅ Authenticated as {company.get('discord_username', company.get('company_name', 'User'))}")
+    if _IS_READ_ONLY:
+        print("⚠️  **Read-only mode** — your access has expired. Contact Fishy Business to renew.")
+    return _COMPANY_ID
+
+
+# Global state for CLI sessions
+_COMPANY_ID: int = 1
+_IS_READ_ONLY: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Main menu & navigation loop
 # ---------------------------------------------------------------------------
 def main_loop() -> None:
     """Display the main menu and route to the selected mode. Loops until the user quits."""
+
+    global _COMPANY_ID, _IS_READ_ONLY
+
+    # Authenticate on startup
+    if _resolve_company() is None:
+        press_enter_to_continue()
+        return
+
+    if _IS_READ_ONLY:
+        print("\n⚠️  Running in READ-ONLY mode. You can view data but cannot modify.")
 
     while True:
         clear_screen()
@@ -581,6 +623,8 @@ def main_loop() -> None:
         print("  [2] Shulker Box Scanner (enter FULL STACKS)")
         print("  [3] Quick Converter (split desired amounts)")
         print("  [4] 📦 Stash Manager (saved inventory)")
+        if _IS_READ_ONLY:
+            print("     ⚠️  READ-ONLY MODE")
         print("  [5] ❌ Exit")
         choice = input("  Choice (1/2/3/4/5): ").strip()
 
@@ -591,11 +635,7 @@ def main_loop() -> None:
         # Fetch / refresh prices for all modes that need them
         if choice in ("1", "2", "3", "4"):
             print("\n⏳ Loading current prices ...")
-            cache = MarketDeal.load_cache()
-            price_iron = MarketDeal.get_price("Iron Ingot", cache)
-            price_gold = MarketDeal.get_price("Gold Ingot", cache)
-            price_diamond = MarketDeal.get_price("Diamond", cache)
-            MarketDeal.save_cache(cache)
+            price_iron, price_gold, price_diamond, _ = fetch_live_prices()
             print("✓ Prices loaded.\n")
         else:
             logger.warning("Invalid menu choice '%s'.", choice)

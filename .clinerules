@@ -1,0 +1,61 @@
+# Cline Rules — DC Trade Toolbox
+
+## Always read first
+Before any task, read `REPO_OVERVIEW.md` for full context on the project structure, key modules, and conventions.
+
+## Python conventions
+- **Python 3.10+** — use modern typing (`list[str]` not `List[str]`, `|` for unions)
+- **Dual DB backend**: SQLite (`?` placeholders) and PostgreSQL (`%s` placeholders) — always support both when writing DB queries
+- **Settings via `Settings` class** in `src/core/settings.py` — use `get_settings()` to access, never hardcode env vars elsewhere
+- **Logging** with `logging.getLogger(__name__)` — use logger instead of `print()` (except in CLI UI prompts where `print()` is intentional)
+- **All DB operations** go through `src/core/database.py` — never access the database directly from web or UI modules
+
+## Project structure rules
+- **CLI** goes in `src/utils/console_ui.py` (terminal prompts, menus)
+- **Web UI** goes in `src/web/app.py` (Streamlit pages)
+- **REST API** goes in `src/web/api.py` (FastAPI endpoints)
+- **Business logic** goes in `src/core/market_deal.py` (MarketDeal class)
+- **DB queries** go in `src/core/database.py`
+
+## Multi-company / Auth conventions
+- **Discord OAuth** for web UI login — companies register automatically on first login
+- **API keys** (`dc_XXXXX` format) for REST API access — send via `X-API-Key` header
+- **All DB queries** pass `company_id` parameter — default is 1 (legacy admin)
+- **company_id=0** in query functions means "all companies" (admin view)
+- **Read-only** is enforced per-company when `access_expires_at` is past — GET allowed, mutations return 403
+- **Admin detection** via `ADMIN_DISCORD_IDS` whitelist in settings (comma-separated Discord IDs)
+- **Trial**: 3 days immediate on first Discord login (`TRIAL_DAYS` in settings)
+- **Session persistence** via Streamlit session state + signed token
+
+## Key gotchas to remember
+1. **DC_API_KEY is required** for any API call — without it the app exits with error
+2. **Stash is per-company** — no longer single-row. `company_id UNIQUE` constraint enforces one stash per company
+3. **Price cache TTL** is 6h by default (`CACHE_DURATION` in settings) — shared across all companies
+4. **Raw blocks** (raw_iron_blocks, raw_gold_blocks) are tracked separately but valued same as refined blocks
+5. **Auto-subtract** toggle in stash — when ON, materials auto-deduct after deals without asking
+6. **Streamlit + FastAPI** run together — Streamlit starts a FastAPI background thread on launch
+7. **Database auto-migrates** on startup via `init_db()` — new columns are added via try/except ALTER TABLE
+8. **Item import** uses `IMPORT_ITEM_MAPPING` in settings — only map new items there if needed
+9. **CLI prompt** for API key on startup — key is cached in `~/.dc_trade_config`
+10. **httpx** is required for Discord OAuth — installed as dependency in pyproject.toml
+11. **Discord OAuth callback** handled via `st.query_params` — Streamlit's built-in url param capture
+
+## Testing
+- Tests use `pytest` with temp SQLite DB fixtures
+- Always use `monkeypatch` to redirect `DB_FILE` to a temp path in tests
+- Run with `make test` or `python -m pytest tests/ -v`
+- Tests exist in `tests/test_database.py` (stash operations) and `tests/test_api.py` (FastAPI endpoints)
+
+## Docker
+- Multi-stage Dockerfile (`Dockerfile` for local, `Dockerfile.cloudrun` for Cloud Run)
+- `docker compose up -d` for SQLite, `docker compose --profile db up -d` for PostgreSQL
+- Health check on port 8000/health
+
+## Deployment
+- Cloud Run via `Dockerfile.cloudrun` + `scripts/run_cloudrun.py`
+- For production: set `DATABASE_URL` to PostgreSQL, run `alembic upgrade head`
+- Cloud Build pipeline: `cloudbuild.yaml`
+- See `DEPLOY_CLOUD_RUN.md` for detailed instructions
+
+## Update this file
+If you discover new important conventions, gotchas, or structural decisions while working, add them to this file so future sessions benefit.

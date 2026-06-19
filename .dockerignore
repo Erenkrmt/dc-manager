@@ -26,5 +26,30 @@ Thumbs.db
 .env
 *.local
 
-# Documentation
+# Documentation (not needed at runtime)
 README.md
+REPO_OVERVIEW.md
+DEPLOY_CLOUD_RUN.md
+
+# Build & CI config (not needed at runtime)
+docker-compose.yml
+cloudbuild.yaml
+Dockerfile
+Dockerfile.cloudrun
+.clinerules
+.gcloudignore
+.python-version
+alembic.ini
+Makefile
+uv.lock
+
+# Tests (not needed at runtime)
+tests/
+
+# Alembic migrations (not needed at runtime in Docker – DB auto-migrates)
+alembic/
+
+# Wrapper entry point (not needed, real entry is src/main.py)
+main.py
+# Cloud Run entry point (only used by Dockerfile.cloudrun, not the main Dockerfile)
+scripts/run_cloudrun.py

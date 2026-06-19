@@ -5,7 +5,7 @@ Used by Alembic for migrations, and can replace raw SQL in database.py.
 """
 
 from sqlalchemy import (
-    Column, Integer, Float, Text, CheckConstraint
+    Column, Integer, Float, Text, CheckConstraint, ForeignKey, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase
 
@@ -14,10 +14,28 @@ class Base(DeclarativeBase):
     pass
 
 
+class Company(Base):
+    """Multi-company registration via Discord OAuth."""
+    __tablename__ = "companies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    discord_id = Column(Text, unique=True, nullable=False)
+    discord_username = Column(Text, nullable=False)
+    discord_avatar = Column(Text, default="")
+    api_key = Column(Text, unique=True, nullable=False)
+    company_name = Column(Text, default="")
+    access_expires_at = Column(Text, nullable=True)  # NULL = never expires
+    is_active = Column(Integer, default=1)
+    trial_used = Column(Integer, default=0)
+    created_at = Column(Text, nullable=False)
+    updated_at = Column(Text, nullable=False)
+
+
 class Deal(Base):
     __tablename__ = "deals"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
     timestamp = Column(Text, nullable=False)
     iron_ingots = Column(Float, default=0)
     gold_ingots = Column(Float, default=0)
@@ -48,7 +66,8 @@ class PriceCache(Base):
 class Stash(Base):
     __tablename__ = "stash"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
     name = Column(Text, default="Default")
     iron_blocks = Column(Integer, default=0)
     iron_ingots = Column(Integer, default=0)
@@ -62,7 +81,7 @@ class Stash(Base):
     updated_at = Column(Text, nullable=False)
 
     __table_args__ = (
-        CheckConstraint("id = 1", name="stash_single_row"),
+        UniqueConstraint("company_id", name="uq_stash_company"),
     )
 
 
@@ -70,6 +89,7 @@ class Template(Base):
     __tablename__ = "templates"
 
     name = Column(Text, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
     iron_ingots = Column(Float, default=0)
     gold_ingots = Column(Float, default=0)
     diamond_items = Column(Float, default=0)
@@ -80,7 +100,23 @@ class PriceHistory(Base):
     __tablename__ = "price_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
     timestamp = Column(Text, nullable=False)
     iron_price = Column(Float, default=0)
     gold_price = Column(Float, default=0)
     diamond_price = Column(Float, default=0)
+
+
+class ItemLookupDeal(Base):
+    __tablename__ = "item_lookup_deals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
+    timestamp = Column(Text, nullable=False)
+    item_name = Column(Text, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    unit_price = Column(Float, nullable=False)
+    total_value = Column(Float, nullable=False)
+    offered_price = Column(Float, nullable=False)
+    status = Column(Text, default="")
+    profit = Column(Float, default=0)

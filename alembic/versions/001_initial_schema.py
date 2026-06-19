@@ -93,8 +93,25 @@ def upgrade() -> None:
     )
     op.create_index("ix_price_history_timestamp", "price_history", ["timestamp"])
 
+    # ── Item lookup deals (missing from original migration) ──────────────
+    op.create_table(
+        "item_lookup_deals",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("timestamp", sa.Text(), nullable=False),
+        sa.Column("item_name", sa.Text(), nullable=False),
+        sa.Column("quantity", sa.Integer(), nullable=False),
+        sa.Column("unit_price", sa.Float(), nullable=False),
+        sa.Column("total_value", sa.Float(), nullable=False),
+        sa.Column("offered_price", sa.Float(), nullable=False),
+        sa.Column("status", sa.Text(), server_default=""),
+        sa.Column("profit", sa.Float(), server_default="0"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_item_lookup_deals_timestamp", "item_lookup_deals", ["timestamp"])
+
 
 def downgrade() -> None:
+    op.drop_table("item_lookup_deals")
     op.drop_table("price_history")
     op.drop_table("templates")
     op.drop_table("stash")
