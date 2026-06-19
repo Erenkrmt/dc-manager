@@ -18,7 +18,7 @@ _settings = get_settings()
 
 # ── Allowed column names for safe dynamic migration queries ──
 _ALLOWED_STASH_COLUMNS = frozenset({"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"})
-_ALLOWED_COMPANY_COLUMNS = frozenset({"session_token", "tier"})
+_ALLOWED_COMPANY_COLUMNS = frozenset({"session_token", "tier", "public_stash_token"})
 
 logger = logging.getLogger(__name__)
 
