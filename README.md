@@ -1,52 +1,10 @@
 # ⛏️ DC Trade Toolbox
 
-Bulk trading calculator for DemocracyCraft Minecraft server.  
-Calculates market values, analyzes deals, manages inventory stash, and tracks price history.
+Bulk trading calculator for the DemocracyCraft Minecraft server. Calculates market values, analyzes deals, manages inventory stash, and tracks price history.
 
-## 🚀 Quick Start
+[![Docker](https://img.shields.io/badge/image-ghcr.io%2Ferenkrmt%2Fdc--trade-blue)](https://github.com/users/erenkrmt/packages/container/package/dc-trade)
 
-### Option 1: Local (Python)
-
-```bash
-# Install
-pip install uv && uv sync
-
-# Set your API key (get from https://api.democracycraft.net)
-cp .env.example .env
-# Edit .env and set DC_API_KEY=your_key
-
-# Start web UI
-streamlit run src/web/app.py
-# → http://localhost:8501
-
-# Or start REST API
-uvicorn src.web.api:app --reload --port 8000
-# → http://localhost:8000/docs
-```
-
-### Option 2: Docker (recommended for deployment)
-
-```bash
-# Build & start
-docker compose up -d
-
-# Or with PostgreSQL for production
-docker compose --profile db up -d
-
-# → Web UI: http://localhost:8501
-# → REST API: http://localhost:8000
-```
-
-### Option 3: Dockge (home server deployment)
-
-If you run [Dockge](https://github.com/louislam/dockge) on your home server:
-
-1. In Dockge, click **Create Stack**
-2. Paste the contents of `docker-compose.yml` into the compose editor
-3. Click **Environment** → add your variables (see below)
-4. Click **Deploy**
-
-The app will be pulled from the pre-built image at `ghcr.io/erenkrmt/dc-trade:latest`.
+---
 
 ## 📋 Features
 
@@ -58,125 +16,125 @@ The app will be pulled from the pre-built image at `ghcr.io/erenkrmt/dc-trade:la
 - **📋 Deal Templates** – Save and load common deal configurations
 - **📈 Price History** – Track price changes over time with snapshots
 - **🌐 REST API** – Programmatic access to stash and deal data
+- **🔐 Multi-Company** – Discord OAuth login, per-company scoping
 
-## 🛠️ Development
+---
+
+## 🚀 Getting Started
+
+### 1. Docker (recommended)
+
+Pull and run the pre-built image from GitHub Container Registry:
 
 ```bash
-# Show all available commands
-make help
+# Quick start with SQLite (no database setup needed)
+docker run -d --name dc-trade \
+  -p 8501:8501 -p 8000:8000 \
+  -e DC_API_KEY="your_api_key_here" \
+  -v dc_trade_data:/app/data \
+  ghcr.io/erenkrmt/dc-trade:latest
 
-# Start both Streamlit + API
-make dev
-
-# Run tests
-make test
-
-# Docker
-make docker-build
-make docker-up
+# Web UI:  http://localhost:8501
+# API:     http://localhost:8000
+# API doc: http://localhost:8000/docs
 ```
 
-## 🐳 Docker Deployment Guide
-
-This project uses a **pre-built image** hosted on GitHub Container Registry (`ghcr.io/erenkrmt/dc-trade`). Every push to `master` triggers a GitHub Action that builds and pushes a new image automatically.
-
-### Local Docker (development)
+Or with docker-compose (recommended for production):
 
 ```bash
-# Build locally from source
-docker compose build
-
-# Start with SQLite (default – no setup needed)
+# Start with SQLite
 docker compose up -d
 
-# Start with PostgreSQL (production-like)
+# Start with PostgreSQL
 docker compose --profile db up -d
-
-# View logs
-docker compose logs -f
-
-# Stop
-docker compose down
 ```
 
-### Auto-build with GitHub Actions
+The image auto-builds on every push to `master` — just pull the latest tag to update.
 
-The CI workflow (`.github/workflows/docker-publish.yml`) runs on every push to `master`:
-
-1. Logs into GitHub Container Registry using the automatic `GITHUB_TOKEN`
-2. Builds the Docker image
-3. Pushes two tags:
-   - `ghcr.io/erenkrmt/dc-trade:latest`
-   - `ghcr.io/erenkrmt/dc-trade:<commit-sha>`
-
-No secrets to configure — the `GITHUB_TOKEN` is provided automatically by GitHub.
-
-### Deploy on Dockge (home server)
-
-[Dockge](https://github.com/louislam/dockge) is a Docker Compose manager with a web UI. To deploy:
-
-**1. Copy the environment template**
-
-Open `.env.example` from this repo — it lists all available variables. Create your own list with real values:
-
-```
-DC_API_KEY=your_actual_api_key
-COMPANY_NAME=Fishy Business
-```
-
-You only need `DC_API_KEY` to get started. The rest are optional (see table below).
-
-**2. Create a stack in Dockge**
-
-In the Dockge web UI:
-- Click **Create Stack**
-- Paste the contents of `docker-compose.yml` into the compose editor
-- Click **Environment** tab → paste your env vars
-- Set the stack name (e.g., `dc-trade`)
-- Click **Deploy**
-
-Dockge will pull `ghcr.io/erenkrmt/dc-trade:latest` and start the container.
-
-**3. Access the services**
-
-| Service  | Port | URL                     |
-|----------|------|-------------------------|
-| Web UI   | 8501 | `http://your-server:8501` |
-| REST API | 8000 | `http://your-server:8000` |
-| API Docs | 8000 | `http://your-server:8000/docs` |
-
-**4. Update to a new version**
-
-Push to `master` → GitHub Action builds a new image → In Dockge click **Update** on the stack → Done.
-
-### 🔒 Enabling SSL / HTTPS
-
-When deploying publicly, you should enable SSL so both the Web UI and REST API are served over HTTPS.
-
-**1. Set environment variables**
-
-Add these to your `.env` (or Dockge Environment tab):
-
-```
-SSL_ENABLED=true
-SSL_CERTFILE=/app/certs/fullchain.pem
-SSL_KEYFILE=/app/certs/privkey.pem
-```
-
-**2. Mount your certificates**
-
-If using `docker-compose.yml`, uncomment the `certs` volume:
-
-```yaml
-volumes:
-  - dc_trade_data:/app/data
-  # - ./certs:/app/certs:ro      # ← uncomment and point to your cert directory
-```
-
-If running via `docker run`:
+### 2. Local (Python)
 
 ```bash
-docker run -d --name dc-trade -p 443:8501 -p 8443:8000 \
+# Install dependencies
+pip install uv && uv sync
+
+# Set up config
+cp .env.example .env
+# Edit .env and set DC_API_KEY=your_key
+
+# Start web UI
+streamlit run src/web/app.py
+
+# Or start REST API
+uvicorn src.web.api:app --reload --port 8000
+```
+
+### 3. From Source (development)
+
+```bash
+make dev       # Start both Streamlit + API
+make test      # Run tests
+make help      # Show all commands
+```
+
+---
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `DC_API_KEY` | `""` | **Yes** | DemocracyCraft API key |
+| `DATABASE_URL` | *(SQLite)* | No | PostgreSQL connection string (leave empty for SQLite) |
+| `DATABASE_SSLMODE` | *(auto)* | No | PostgreSQL SSL mode: `disable`, `require`, `verify-full` etc. Auto-detected for local vs remote hosts |
+| `POSTGRES_PASSWORD` | `""` | No | Password for the PostgreSQL container (`--profile db`) |
+| `COMPANY_NAME` | `Fishy Business` | No | Branding in the web UI |
+| `STREAMLIT_PORT` | `8501` | No | Web UI port |
+| `API_PORT` | `8000` | No | REST API port |
+| `API_TIMEOUT` | `10` | No | HTTP request timeout (seconds) |
+| `API_RETRIES` | `3` | No | Number of API retries |
+| `MIN_ACCEPTABLE_PERCENT` | `0.85` | No | Minimum deal threshold |
+| `CACHE_DURATION` | `21600` | No | Price cache TTL (seconds, 6h) |
+| `SSL_ENABLED` | `false` | No | Enable HTTPS for both servers |
+| `SSL_CERTFILE` | `""` | No* | Path to SSL certificate file (`/app/certs/fullchain.pem`) |
+| `SSL_KEYFILE` | `""` | No* | Path to SSL private key (`/app/certs/privkey.pem`) |
+| `DISCORD_CLIENT_ID` | `""` | No | Discord OAuth 2.0 client ID |
+| `DISCORD_CLIENT_SECRET` | `""` | No | Discord OAuth 2.0 client secret |
+| `DISCORD_REDIRECT_URI` | `http://localhost:8501/` | No | Discord OAuth redirect URL |
+| `ADMIN_DISCORD_IDS` | `""` | No | Comma-separated Discord user IDs with admin access |
+| `TRIAL_DAYS` | `3` | No | Free trial duration for new companies |
+| `SESSION_SECRET` | *(auto)* | No | Session cookie signing key |
+| `DEBUG` | `false` | No | Enable debug logging |
+
+*\* Required when `SSL_ENABLED=true`.*
+
+### Database
+
+The app supports two database backends:
+
+- **SQLite** (default) — No setup required. Database file is stored at `data/dc_trade.db`.
+- **PostgreSQL** (production) — Set `DATABASE_URL` to a connection string:
+  ```
+  DATABASE_URL=postgres://user:password@host:5432/database
+  ```
+
+  The database, user, and tables must exist. Tables are created automatically on first start (`CREATE TABLE IF NOT EXISTS`). Use the bundled PostgreSQL container with `docker compose --profile db up -d`.
+
+  > **SSL mode:** For remote PostgreSQL hosts, the connection uses `sslmode=require` by default. Override with `DATABASE_SSLMODE=disable` (or `verify-full`, `verify-ca`, etc.).
+
+### SSL / HTTPS
+
+To serve the web UI and REST API over HTTPS:
+
+```bash
+# Generate a self-signed certificate (for testing)
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout privkey.pem -out fullchain.pem \
+  -subj "/CN=localhost"
+
+# Run with SSL
+docker run -d --name dc-trade \
+  -p 443:8501 -p 8443:8000 \
   -e DC_API_KEY="..." \
   -e SSL_ENABLED=true \
   -e SSL_CERTFILE=/app/certs/fullchain.pem \
@@ -185,58 +143,54 @@ docker run -d --name dc-trade -p 443:8501 -p 8443:8000 \
   ghcr.io/erenkrmt/dc-trade:latest
 ```
 
-**3. Discord OAuth**
+Or uncomment the `certs` volume in `docker-compose.yml`:
 
-When SSL is enabled and `DISCORD_REDIRECT_URI` starts with `http://`, the application **automatically upgrades** it to `https://`. No manual change needed.
-
-**4. Local testing (self-signed certificates)**
-
-```bash
-# Generate a self-signed cert
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout privkey.pem -out fullchain.pem \
-  -subj "/CN=localhost"
-
-# Then set SSL_ENABLED=true and point to these files
+```yaml
+volumes:
+  - dc_trade_data:/app/data
+  - ./certs:/app/certs:ro     # mount your certificate files here
 ```
+
+For production, use Let's Encrypt or a reverse proxy (nginx, Caddy, Traefik).
+
+> **Discord OAuth:** When SSL is enabled, the app automatically upgrades `DISCORD_REDIRECT_URI` from `http://` to `https://` — no manual change needed.
+
+### Discord Authentication
+
+1. Create an application at [discord.com/developers](https://discord.com/developers/applications)
+2. Set `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` in your environment
+3. Set `DISCORD_REDIRECT_URI` to your app's URL followed by `/` (e.g. `https://yourdomain.com/`)
+4. Set `ADMIN_DISCORD_IDS` for users that should have admin access
+5. The first login creates a company with a trial period (`TRIAL_DAYS`)
 
 ---
 
-### Using PostgreSQL in production
+## 🔌 REST API
 
-To switch from SQLite to PostgreSQL:
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/health` | — | Health check |
+| `GET` | `/auth/me` | API key | Current company info |
+| `PUT` | `/auth/name` | API key | Update company name |
+| `POST` | `/auth/company` | — | Create a new company |
+| `GET` | `/stash` | API key | Get stash contents |
+| `PUT` | `/stash` | API key | Update stash |
+| `PUT` | `/stash/add` | API key | Add materials to stash |
+| `POST` | `/stash/clear` | API key | Reset stash to zero |
+| `GET` | `/stash/raw` | API key | Parse a game-item dump into stash |
+| `GET` | `/stash/auto_subtract` | API key | Check auto-subtract setting |
+| `PUT` | `/stash/auto_subtract` | API key | Toggle auto-subtract |
+| `GET` | `/deals` | API key | List recent deals |
+| `GET` | `/deals/stats` | API key | Deal statistics |
+| `PUT` | `/deals/update` | API key | Update a deal |
+| `DELETE` | `/deals/delete` | API key | Delete a deal |
+| `GET` | `/prices` | — | Current market prices |
+| `GET` | `/prices/history` | — | Price history (last 30 days) |
+| `GET` | `/stash/public/{token}` | — | Public stash view (no API key needed) |
 
-1. Uncomment/Set these environment variables in Dockge:
-   ```
-   DATABASE_URL=postgres://dctrade:YOUR_PASSWORD_HERE@postgres:5432/dctrade
-   POSTGRES_PASSWORD=YOUR_PASSWORD_HERE
-   POSTGRES_USER=dctrade
-   POSTGRES_DB=dctrade
-   ```
-2. In the compose editor, add `--profile db` to the stack, OR enable the profile in Dockge by adding the `db` profile to the `app` service's `profiles` list.
+**Authentication** uses the `X-API-Key` header. Get your API key from the web UI (Profile → Show API key).
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DC_API_KEY` | `""` | **Required.** DemocracyCraft API key |
-| `COMPANY_NAME` | `Fishy Business` | Branding in UI |
-| `DATABASE_URL` | *(SQLite)* | PostgreSQL connection string for production |
-| `DATABASE_SSLMODE` | *(auto)* | PostgreSQL SSL mode: `disable`, `require`, `verify-ca`, etc. Empty = auto-detect |
-| `API_TIMEOUT` | `10` | Seconds before API timeout |
-| `API_RETRIES` | `3` | Number of API retries |
-| `MIN_ACCEPTABLE_PERCENT` | `0.85` | Minimum deal threshold (85%) |
-| `CACHE_DURATION` | `21600` | Price cache TTL in seconds (6h) |
-| `SSL_ENABLED` | `false` | Set `true` to serve HTTPS (requires cert files) |
-| `SSL_CERTFILE` | `""` | Path to SSL certificate file (e.g. `/app/certs/fullchain.pem`) |
-| `SSL_KEYFILE` | `""` | Path to SSL private key file (e.g. `/app/certs/privkey.pem`) |
-| `DEBUG` | `false` | Enable debug mode |
-
-## 🗄️ Database
-
-- **Default:** SQLite (`data/dc_trade.db`) – no setup required
-- **Production:** PostgreSQL via `DATABASE_URL` env var
-- **Migrations:** Alembic (`alembic upgrade head`)
+---
 
 ## 📁 Project Structure
 
@@ -252,3 +206,22 @@ dc_trade_api/
 ├── Dockerfile
 ├── docker-compose.yml
 └── Makefile
+```
+
+## 🛠️ Development Commands
+
+```bash
+make help              # Show all commands
+make install           # Install dependencies
+make dev               # Start both servers
+make streamlit         # Start web UI only
+make api               # Start REST API only
+make test              # Run tests
+make docker-build      # Build Docker image
+make docker-up         # Start Docker stack
+make docker-down       # Stop Docker stack
+```
+
+## 📄 License
+
+MIT

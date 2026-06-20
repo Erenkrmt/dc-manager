@@ -14,6 +14,7 @@ services:
     image: ghcr.io/erenkrmt/dc-trade:latest
     container_name: dc-trade
     restart: unless-stopped
+    pull_policy: always
     ports:
       - "${STREAMLIT_PORT:-8501}:8501"   # Streamlit web UI
       - "${API_PORT:-8000}:8000"         # FastAPI REST API
