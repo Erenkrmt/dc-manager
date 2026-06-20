@@ -1131,6 +1131,32 @@ elif page == "📦 Stash Manager":
     st.caption(f"🚚 Shipping: ~{stacks:.1f} stacks (~{shulkers:.2f} shulker boxes)")
 
     st.markdown("---")
+    st.subheader("🔗 Public Stash Link")
+    _company = db.get_company_by_id(company_id)
+    public_token = (_company or {}).get("public_stash_token", "")
+    if public_token:
+        api_host = os.getenv("API_HOST", "localhost")
+        api_port = os.getenv("API_PORT", "8000")
+        public_url = f"http://{api_host}:{api_port}/stash/public/{public_token}"
+        st.success("✅ Public stash is enabled!")
+        st.code(public_url, language="text")
+        st.caption("Share this URL with customers. No API key needed.")
+        read_only = st.session_state.is_read_only
+        if st.button("🔄 Regenerate Token", disabled=read_only):
+            new_token = db.generate_public_stash_token(company_id)
+            if new_token:
+                st.success("🆕 New public stash token generated!")
+                st.rerun()
+    else:
+        st.info("🔒 No public stash link — customers need an API key to view your stash.")
+        read_only = st.session_state.is_read_only
+        if st.button("🔓 Enable Public Stash Link", disabled=read_only):
+            new_token = db.generate_public_stash_token(company_id)
+            if new_token:
+                st.success("✅ Public stash link enabled!")
+                st.rerun()
+
+    st.markdown("---")
 
     read_only = st.session_state.is_read_only
     if read_only:

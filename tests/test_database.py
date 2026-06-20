@@ -50,11 +50,14 @@ class TestCompanyManagement:
         assert company["access_expires_at"] is not None  # trial set
 
     def test_get_or_create_company_returns_existing(self):
-        """Calling again with the same Discord ID should return the same company."""
+        """Calling again with the same Discord ID should return the same company.
+        The API key is only returned on creation (raw); existing lookups return empty string.
+        """
         c1 = db.get_or_create_company_by_discord("12345", "TestUser")
         c2 = db.get_or_create_company_by_discord("12345", "TestUser")
         assert c1["id"] == c2["id"]
-        assert c1["api_key"] == c2["api_key"]
+        assert c1["api_key"].startswith("dc_")  # raw key on creation
+        assert c2["api_key"] == ""  # masked on existing lookup
 
     def test_get_company_by_api_key(self):
         """Lookup by API key should return the company."""

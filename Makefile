@@ -3,7 +3,7 @@
 # Common tasks for development and deployment.
 # =============================================================================
 
-.PHONY: help install dev streamlit api docker-build docker-up docker-down test clean
+.PHONY: help install dev streamlit api docker-build docker-up docker-down test clean env env-encrypt
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -35,6 +35,13 @@ docker-down: ## Stop all services (Docker)
 
 docker-logs: ## Show logs
 	docker compose logs -f
+
+env: ## Decrypt .env.encrypted → .env (requires age key in ~/.config/sops/age/keys.txt)
+	@bash scripts/setup_env.sh
+
+env-encrypt: ## Encrypt .env → .env.encrypted (requires age key in ~/.config/sops/age/keys.txt)
+	SOPS_AGE_KEY_FILE=$$HOME/.config/sops/age/keys.txt sops --encrypt --input-type dotenv --output-type dotenv .env > .env.encrypted
+	@echo "✅ Encrypted .env → .env.encrypted"
 
 test: ## Run tests
 	python -m pytest tests/ -v

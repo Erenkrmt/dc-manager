@@ -27,6 +27,14 @@ Before any task, read `REPO_OVERVIEW.md` for full context on the project structu
 - **Trial**: 3 days immediate on first Discord login (`TRIAL_DAYS` in settings)
 - **Session persistence** via Streamlit session state + signed token
 
+## Environment secrets via SOPS + age
+- **`.env` is gitignored** — secrets never go in git
+- **`.env.encrypted` is tracked** — encrypted with SOPS + age, safe to commit
+- **Your age private key** lives at `~/.config/sops/age/keys.txt` — never shared
+- **On a new machine**: run `make env` or `./scripts/setup_env.sh` after copying your age key
+- **After changing `.env`**: run `make env-encrypt` to update `.env.encrypted`, then commit it
+- **Config file**: `.sops.yaml` maps the age public key
+
 ## Key gotchas to remember
 1. **DC_API_KEY is required** for any API call — without it the app exits with error
 2. **Stash is per-company** — no longer single-row. `company_id UNIQUE` constraint enforces one stash per company

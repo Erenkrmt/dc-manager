@@ -385,16 +385,12 @@ _STASH_PUBLIC_HTML = """\
 """
 
 
-@app.get("/stash/public", response_class=HTMLResponse)
-def get_stash_public(api_key: str = Depends(get_api_key)) -> str:
-    """Return a public, read-only HTML page showing the stash (shareable with customers)."""
+def _render_public_stash_page(company: dict) -> str:
+    """Render the public stash HTML page for a given company."""
     from src.core.market_deal import fetch_live_prices, stash_ingot_equivalents
 
-    company = _resolve_company(api_key)
     stash = db.load_stash(company_id=company["id"])
-
     total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
-
     p_iron, p_gold, p_diamond, _ = fetch_live_prices()
 
     iron_value = total_iron * p_iron
@@ -418,8 +414,51 @@ def get_stash_public(api_key: str = Depends(get_api_key)) -> str:
         gold_value=gold_value,
         diamond_value=diamond_value,
         total_value=total_value,
-        stash_url=str(app.url_path_for("get_stash_raw")),
+        stash_url="",  # no JSON link for public view
     )
+
+
+@app.get("/stash/public", response_class=HTMLResponse)
+def get_stash_public(api_key: str = Depends(get_api_key)) -> str:
+    """Return a public, read-only HTML page showing the stash (authenticated)."""
+    company = _resolve_company(api_key)
+    return _render_public_stash_page(company)
+
+
+@app.get("/stash/public/{token}", response_class=HTMLResponse)
+def get_stash_public_by_token(token: str) -> str:
+    """
+    Return a public, read-only HTML page showing a company's stash via public token.
+    No API key required — share this URL with customers.
+    """
+    company = db.get_company_by_public_token(token)
+    if not company:
+        raise HTTPException(status_code=404, detail="Invalid or inactive public stash token")
+    return _render_public_stash_page(company)
+
+
+# ---------------------------------------------------------------------------
+# Public stash token management (authenticated)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/stash/public_token")
+def get_public_token(api_key: str = Depends(get_api_key)) -> dict:
+    """Return the current company's public stash token (or empty if not set)."""
+    company = _resolve_company(api_key)
+    token = company.get("public_stash_token", "")
+    return {"public_stash_token": token}
+
+
+@app.post("/stash/public_token/generate")
+def generate_public_token(api_key: str = Depends(get_api_key)) -> dict:
+    """Generate a new public stash token for the authenticated company."""
+    company = _resolve_company(api_key)
+    _check_write_access(company)
+    token = db.generate_public_stash_token(company["id"])
+    if not token:
+        raise HTTPException(status_code=500, detail="Failed to generate token")
+    return {"public_stash_token": token}
 
 
 # ---------------------------------------------------------------------------

@@ -315,7 +315,7 @@ def _run_pg_migrations(cursor, conn) -> None:
         if cursor.fetchone() is None:
             cursor.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
             logger.debug("Migration: added %s column.", col)
-    for col in ["tier"]:
+    for col in ["session_token", "tier", "public_stash_token"]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in PG migration.", col)
             continue
@@ -325,7 +325,8 @@ def _run_pg_migrations(cursor, conn) -> None:
             (col,),
         )
         if cursor.fetchone() is None:
-            cursor.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT 'free'")
+            default_val = "''" if col in ("session_token", "public_stash_token") else "'free'"
+            cursor.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}")
             logger.debug("Migration: added %s column to companies table.", col)
     conn.commit()
 
@@ -342,7 +343,7 @@ def _run_sqlite_migrations(conn) -> None:
             logger.debug("Migration: added %s column.", col)
         except sqlite3.OperationalError:
             pass
-    for col in ["session_token", "tier"]:
+    for col in ["session_token", "tier", "public_stash_token"]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in SQLite migration.", col)
             continue
@@ -418,6 +419,7 @@ def get_or_create_company_by_discord(
             conn.commit()
             company["discord_username"] = discord_username
             company["discord_avatar"] = discord_avatar
+            company["api_key"] = ""  # existing companies: don't expose the stored hash
             return company
 
         # Create new company with trial
@@ -446,12 +448,13 @@ def get_or_create_company_by_discord(
             )
         conn.commit()
 
-        # Fetch the newly created company
+        # Fetch the newly created company and inject the raw API key
         cursor.execute(
             f"SELECT * FROM companies WHERE discord_id = {ph}",
             (discord_id,),
         )
         company = _fetchone_as_dict(cursor)
+        company["api_key"] = raw_api_key  # return the raw key, not the hash
         logger.info("New company created via Discord: %s (%s)", discord_username, discord_id)
         return company
 
@@ -650,6 +653,45 @@ def set_company_tier(company_id: int, tier: str) -> bool:
     except Exception as exc:
         logger.error("Failed to set company tier: %s", exc)
         return False
+
+
+def get_company_by_public_token(token: str) -> Optional[dict]:
+    """Look up a company by its public stash token. Returns None if not found or inactive."""
+    ph = _ph()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM companies WHERE public_stash_token = {ph} AND is_active = 1",
+            (token,),
+        )
+        row = _fetchone_as_dict(cursor)
+        conn.close()
+        return row
+    except Exception as exc:
+        logger.error("Failed to look up company by public token: %s", exc)
+        return None
+
+
+def generate_public_stash_token(company_id: int) -> Optional[str]:
+    """Generate a new public stash token for a company. Returns the token string."""
+    ph = _ph()
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    token = f"pub_{secrets.token_hex(12)}"  # e.g. pub_abc123... (24 hex chars)
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE companies SET public_stash_token = {ph}, updated_at = {ph} WHERE id = {ph}",
+            (token, now, company_id),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Public stash token generated for company %d", company_id)
+        return token
+    except Exception as exc:
+        logger.error("Failed to generate public stash token: %s", exc)
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
