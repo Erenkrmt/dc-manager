@@ -230,8 +230,10 @@ class TestPricesEndpoint:
 
     def test_prices_structure(self, client, monkeypatch):
         """The prices endpoint should return a prices dict with expected keys."""
+
         def _mock_fetch_live_prices(*args, **kwargs):
             return (5.0, 10.0, 20.0, {})
+
         monkeypatch.setattr("src.web.api.fetch_live_prices", _mock_fetch_live_prices)
         r = client.get("/prices")
         assert r.status_code == 200
