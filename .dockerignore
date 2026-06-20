@@ -26,5 +26,24 @@ Thumbs.db
 .env
 *.local
 
-# Documentation
+# Documentation (not needed at runtime)
 README.md
+REPO_OVERVIEW.md
+
+# Build & CI config (not needed at runtime)
+docker-compose.yml
+Dockerfile
+.clinerules
+.python-version
+alembic.ini
+Makefile
+uv.lock
+
+# Tests (not needed at runtime)
+tests/
+
+# Alembic migrations (not needed at runtime in Docker – DB auto-migrates)
+alembic/
+
+# Wrapper entry point (not needed, real entry is src/main.py)
+main.py

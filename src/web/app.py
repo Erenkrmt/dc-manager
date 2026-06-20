@@ -1,5 +1,6 @@
 """
 DemocracyCraft Trading Toolbox – Streamlit Web Interface
+Multi-company: Discord OAuth login, scoped by company_id, admin dashboard.
 """
 
 import sys
@@ -7,7 +8,13 @@ import os
 import logging
 import subprocess
 import threading
+import hashlib
+import hmac
+import json
+import secrets
 from pathlib import Path
+from urllib.parse import urlencode, parse_qs
+from datetime import datetime, timedelta, timezone
 
 # Ensure the project root is on sys.path so src.* imports resolve
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -15,15 +22,173 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 import streamlit as st
 import pandas as pd
 
-from src.core.market_deal import MarketDeal
+from src.core.market_deal import MarketDeal, analyze_deal, stash_ingot_equivalents, format_subtract_result, fetch_live_prices, stash_market_value, total_stash_shipping
 from src.core.settings import get_settings
 from src.core import database as db
+from src.web.discord_oauth import get_authorize_url, get_avatar_url
+
+logger = logging.getLogger(__name__)
 
 _settings = get_settings()
 
 # Initialize database schema on startup
 db.init_db()
 
+# ── Session helpers ────────────────────────────────────────────────────────
+
+def _generate_session_token() -> str:
+    """Generate a cryptographically random session token."""
+    return secrets.token_hex(24)  # 48 chars, 192 bits of entropy
+
+
+def _validate_session(company_id: int, token: str) -> bool:
+    """Validate a session token by checking it against the stored token in DB."""
+    company = db.get_company_by_id(company_id)
+    if not company:
+        return False
+    stored_token = company.get("session_token", "")
+    return bool(stored_token) and hmac.compare_digest(stored_token, token)
+
+
+def _store_session_token(company_id: int, token: str) -> None:
+    """Store a session token for a company in the database."""
+    ph = db._ph()
+    try:
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE companies SET session_token = {ph}, updated_at = {ph} WHERE id = {ph}",
+            (token, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), company_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.error("Failed to store session token: %s", exc)
+
+
+def _clear_session_token(company_id: int) -> None:
+    """Clear the stored session token from the database."""
+    ph = db._ph()
+    try:
+        conn = db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE companies SET session_token = {ph}, updated_at = {ph} WHERE id = {ph}",
+            ("", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), company_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.error("Failed to clear session token: %s", exc)
+
+
+def _try_restore_session() -> bool:
+    """
+    Try to restore session from a one-time URL session token.
+    If valid, generates a NEW token (consuming the old one, rotates it).
+    Returns True if session was restored.
+    """
+    session_param = st.query_params.get("session", None)
+    if isinstance(session_param, list):
+        session_param = session_param[0] if session_param else None
+    if not session_param:
+        return False
+
+    try:
+        parts = session_param.split(":")
+        if len(parts) != 2:
+            return False
+        cid, token = int(parts[0]), parts[1]
+
+        if not _validate_session(cid, token):
+            return False
+
+        company = db.get_company_by_id(cid)
+        if not company:
+            return False
+
+        # Token is valid — rotate it (generate new one, store in DB + URL)
+        new_token = _generate_session_token()
+        _store_session_token(cid, new_token)
+
+        st.session_state.company_id = cid
+        st.session_state.company_name = company.get("company_name", "")
+        st.session_state.discord_username = company.get("discord_username", "")
+        st.session_state.discord_avatar_url = company.get("discord_avatar", "")
+        st.session_state.session_token = new_token
+        st.session_state.is_admin = company.get("discord_id", "") in _settings.ADMIN_DISCORD_IDS
+        _is_active, _is_read_only = db.check_company_access(cid)
+        st.session_state.is_read_only = _is_read_only
+        st.session_state.is_active = _is_active
+
+        # Update URL with rotated token
+        st.query_params.clear()
+        st.query_params["session"] = f"{cid}:{new_token}"
+        return True
+    except (ValueError, IndexError):
+        return False
+
+
+def init_session_state() -> None:
+    """Initialize the session state keys we use throughout."""
+    if "company_id" not in st.session_state:
+        st.session_state.company_id = None
+    if "company_name" not in st.session_state:
+        st.session_state.company_name = ""
+    if "discord_username" not in st.session_state:
+        st.session_state.discord_username = ""
+    if "discord_avatar_url" not in st.session_state:
+        st.session_state.discord_avatar_url = ""
+    if "is_admin" not in st.session_state:
+        st.session_state.is_admin = False
+    if "is_read_only" not in st.session_state:
+        st.session_state.is_read_only = False
+    if "session_token" not in st.session_state:
+        st.session_state.session_token = ""
+    if "is_active" not in st.session_state:
+        st.session_state.is_active = False
+
+    # Try to restore session from URL token (one-time, rotated on restore)
+    if st.session_state.company_id is None:
+        _try_restore_session()
+
+    if "selected_admin_company" not in st.session_state:
+        st.session_state.selected_admin_company = None
+    if "template_load" not in st.session_state:
+        st.session_state.template_load = None
+    if "deal_result" not in st.session_state:
+        st.session_state.deal_result = None
+    if "shulker_result" not in st.session_state:
+        st.session_state.shulker_result = None
+
+
+def clear_session() -> None:
+    """Clear all session state (logout)."""
+    # Clear the stored session token from DB so it can't be reused
+    cid = st.session_state.get("company_id")
+    if cid is not None:
+        _clear_session_token(cid)
+    st.session_state.company_id = None
+    st.session_state.company_name = ""
+    st.session_state.discord_username = ""
+    st.session_state.discord_avatar_url = ""
+    st.session_state.is_admin = False
+    st.session_state.is_read_only = False
+    st.session_state.session_token = ""
+    st.session_state.selected_admin_company = None
+
+
+def check_read_only() -> None:
+    """Show a warning banner if company is in read-only mode."""
+    if st.session_state.is_read_only:
+        st.warning(
+            "🔒 **Read-only mode.** Your trial/access has expired. "
+            "Contact Fishy Business to renew your subscription.",
+            icon="⚠️",
+        )
+
+
+# ── API Background Thread ──────────────────────────────────────────────────
 
 def _start_api_server():
     """Start the FastAPI server in a background thread."""
@@ -39,18 +204,13 @@ def _start_api_server():
         pass
 
 
-# Kick off the API server in a daemon thread (it will die when the main process exits)
+# Kick off the API server in a daemon thread
 api_thread = threading.Thread(target=_start_api_server, daemon=True)
 api_thread.start()
 
 
-def main() -> None:
-    """Entry point for `dc-trade-web` CLI command."""
-    # Streamlit handles its own execution; this function exists so
-    # pyproject.toml can reference src.web.app:main
-    pass
+# ── Page Config ────────────────────────────────────────────────────────────
 
-# Page config
 st.set_page_config(
     page_title=f"{_settings.COMPANY_NAME} Toolbox",
     page_icon="⛏️",
@@ -58,50 +218,219 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# Helper: fetch live prices (cached)
-# ---------------------------------------------------------------------------
+init_session_state()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGIN PAGE
+# ═══════════════════════════════════════════════════════════════════════════
+
+def render_login_page() -> None:
+    """Display the login/landing page before the user authenticates."""
+    st.title(f"⛏️ {_settings.COMPANY_NAME} Toolbox")
+    st.markdown("### Bulk Trading Calculator for DemocracyCraft")
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("🔑 Login with Discord")
+        st.markdown(
+            "Sign in with your Discord account to access the trading toolbox.\n\n"
+            "**First time?** You'll get a **3-day free trial** immediately."
+        )
+
+        # Build the Discord OAuth authorize URL
+        discord_login_url = get_authorize_url(state="dc_trade")
+
+        # Use st.link_button to redirect to Discord
+        st.link_button(
+            "🔵 Login with Discord",
+            discord_login_url,
+            use_container_width=True,
+            type="primary",
+        )
+
+        # ── Handle OAuth callback ──
+        # Discord redirects back to this page with ?code=xxx
+        query_params = st.query_params
+        code = query_params.get("code", [None])
+        if isinstance(code, list):
+            code = code[0] if code else None
+
+        if code:
+            from src.web.discord_oauth import exchange_code_sync, get_user_info_sync
+
+            try:
+                token_data = exchange_code_sync(code)
+                if not token_data:
+                    st.error("❌ Login failed: Discord token exchange returned no data.")
+                    user = None
+                else:
+                    access_token = token_data.get("access_token")
+                    if not access_token:
+                        st.error("❌ Login failed: No access token in Discord response.")
+                        user = None
+                    else:
+                        user = get_user_info_sync(access_token)
+            except Exception as exc:
+                logger.exception("Discord OAuth login failed")
+                st.error(f"❌ Login failed: {exc}")
+                user = None
+
+            if user:
+                discord_id = str(user["id"])
+                discord_username = user.get("username", "Unknown")
+                discord_avatar = get_avatar_url(user)
+
+                # Get or create company
+                try:
+                    company = db.get_or_create_company_by_discord(
+                        discord_id, discord_username, discord_avatar
+                    )
+                except Exception as exc:
+                    st.error(f"❌ Database error: {exc}")
+                    company = None
+
+                if company:
+                    # Generate random session token and store in DB
+                    session_token = _generate_session_token()
+                    _store_session_token(company["id"], session_token)
+
+                    # Set session state
+                    st.session_state.company_id = company["id"]
+                    st.session_state.company_name = company.get("company_name", "")
+                    st.session_state.discord_username = discord_username
+                    st.session_state.discord_avatar_url = discord_avatar
+                    st.session_state.session_token = session_token
+
+                    # Check admin status
+                    st.session_state.is_admin = discord_id in _settings.ADMIN_DISCORD_IDS
+
+                    # Check read-only status
+                    _is_active, _is_read_only = db.check_company_access(company["id"])
+                    st.session_state.is_read_only = _is_read_only
+                    st.session_state.is_active = _is_active
+
+                    # Clear query params so code doesn't persist, no session in URL
+                    st.query_params.clear()
+                    st.rerun()
+                else:
+                    st.error("❌ Could not create or find your company account.")
+            else:
+                st.error("❌ Discord login failed. Please try again.")
+
+    with col2:
+        st.subheader("🐟 About")
+        st.markdown(
+            f"Welcome to **{_settings.COMPANY_NAME}'s** trading toolbox!\n\n"
+            "**Features:**\n"
+            "- 💰 Deal Calculator\n"
+            "- 📦 Shulker Scanner\n"
+            "- 📊 Deal History\n"
+            "- 📦 Stash Manager\n"
+            "- 📋 Deal Templates\n"
+            "- 🔍 Item Lookup\n"
+            "- 📈 Price History\n\n"
+            "Powered by the DemocracyCraft economy API."
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN UI (authenticated)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def main() -> None:
+    """Entry point for `dc-trade-web` CLI command."""
+    pass
+
+
+# ── If not logged in, show login page ──
+if st.session_state.company_id is None:
+    render_login_page()
+    st.stop()
+
+# ── Logged in — show read-only warning if needed ──
+check_read_only()
+
+# Determine the company_id to use (admin may view other companies)
+company_id = st.session_state.company_id
+admin_viewing_company = st.session_state.get("selected_admin_company")
+if admin_viewing_company is not None and st.session_state.is_admin:
+    company_id = admin_viewing_company
+
+# ── Logout button in top-right ──
+with st.container():
+    col_logo, col_logout = st.columns([5, 1])
+    with col_logo:
+        avatar = st.session_state.discord_avatar_url
+        username = st.session_state.discord_username
+        if avatar:
+            st.markdown(
+                f"<span style='display:flex;align-items:center;gap:8px;'>"
+                f"<img src='{avatar}' width='32' height='32' style='border-radius:50%'>"
+                f"<span>{username}</span>"
+                f"</span>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(f"👤 {username}")
+    with col_logout:
+        if st.button("🚪 Logout"):
+            clear_session()
+            st.query_params.clear()
+            st.rerun()
+
+st.markdown("---")
+
+# ── Fetch live prices (cached) ──
 @st.cache_data(ttl=_settings.CACHE_DURATION, show_spinner="⏳ Fetching live prices...")
 def fetch_prices() -> tuple[float, float, float]:
-    cache = MarketDeal.load_cache()
-    p_iron = MarketDeal.get_price("Iron Ingot", cache)
-    p_gold = MarketDeal.get_price("Gold Ingot", cache)
-    p_diamond = MarketDeal.get_price("Diamond", cache)
-    MarketDeal.save_cache(cache)
+    p_iron, p_gold, p_diamond, _ = fetch_live_prices()
     return p_iron, p_gold, p_diamond
 
 
-# ---------------------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------------------
+price_iron, price_gold, price_diamond = fetch_prices()
+
+# ── Sidebar ──
 st.sidebar.title(f"⛏️ {_settings.COMPANY_NAME} Toolbox")
+st.sidebar.markdown(f"👤 **{st.session_state.discord_username}**")
+if st.session_state.is_admin:
+    st.sidebar.success("🛡️ **Admin Mode**")
+if st.session_state.is_read_only:
+    st.sidebar.warning("🔒 **Read-only**")
 st.sidebar.markdown("---")
 
-page = st.sidebar.radio(
-    "Navigation",
-    [
-        "💰 Deal Calculator",
+# Navigation — admin gets extra pages; free tier gets limited features
+_company_tier = db.get_company_tier(company_id)
+_is_premium = _company_tier == "premium" or st.session_state.is_admin
+
+nav_pages = [
+    "💰 Deal Calculator",
+    "⚡ Quick Converter",
+    "📊 Deal History",
+]
+if _is_premium:
+    nav_pages += [
         "📦 Shulker Scanner",
-        "⚡ Quick Converter",
-        "📊 Deal History",
         "📦 Stash Manager",
         "📋 Deal Templates",
         "🔍 Item Lookup",
         "📈 Price History",
-    ],
-)
+    ]
+nav_pages.append("👤 My Profile")
+if st.session_state.is_admin:
+    nav_pages.append("🏢 Company Management")
+
+page = st.sidebar.radio("Navigation", nav_pages)
 
 st.sidebar.markdown("---")
 
-# Fetch prices (with caching)
-price_iron, price_gold, price_diamond = fetch_prices()
-
+# Sidebar: live prices
 st.sidebar.subheader("📈 Live Prices")
 st.sidebar.metric("Iron Ingot", f"${price_iron:.2f}")
 st.sidebar.metric("Gold Ingot", f"${price_gold:.2f}")
 st.sidebar.metric("Diamond", f"${price_diamond:.2f}")
 
-# Block and stack-of-blocks prices
 iron_block_price = price_iron * _settings.INGOTS_PER_BLOCK
 gold_block_price = price_gold * _settings.INGOTS_PER_BLOCK
 diamond_block_price = price_diamond * _settings.INGOTS_PER_BLOCK
@@ -123,47 +452,39 @@ prices_block_col1.metric("Diamond", f"${diamond_block_price:.2f}")
 prices_block_col2.metric("Diamond", f"${diamond_block_price * 64:,.2f}")
 prices_block_col3.metric("Diamond", f"${diamond_block_price * 64 * min_pct:,.2f}", delta=f"-{(1-min_pct)*100:.0f}%")
 
-# Fetch and display stash in sidebar
-stash_summary = db.load_stash()
+# Sidebar: stash summary (scoped) — using shared stash_ingot_equivalents
+stash_summary = db.load_stash(company_id=company_id)
 st.sidebar.subheader("📦 Your Stash")
 
-# Helper: compute total ingot equivalents including raw blocks (treated as same value)
-def _total_iron_ingots(s: dict) -> int:
-    return (s.get("iron_blocks", 0) + s.get("raw_iron_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("iron_ingots", 0)
-def _total_gold_ingots(s: dict) -> int:
-    return (s.get("gold_blocks", 0) + s.get("raw_gold_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("gold_ingots", 0)
-def _total_diamond_items(s: dict) -> int:
-    return s.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK + s.get("diamond_items", 0)
-
 if stash_summary.get("updated_at") != "never" and any(
-    [stash_summary["iron_blocks"], stash_summary["iron_ingots"],
-     stash_summary["gold_blocks"], stash_summary["gold_ingots"],
-     stash_summary["diamond_blocks"], stash_summary["diamond_items"],
+    [stash_summary.get("iron_blocks", 0), stash_summary.get("iron_ingots", 0),
+     stash_summary.get("gold_blocks", 0), stash_summary.get("gold_ingots", 0),
+     stash_summary.get("diamond_blocks", 0), stash_summary.get("diamond_items", 0),
      stash_summary.get("raw_iron_blocks", 0), stash_summary.get("raw_gold_blocks", 0)]
 ):
-    total_iron = _total_iron_ingots(stash_summary)
-    total_gold = _total_gold_ingots(stash_summary)
-    total_diamond = _total_diamond_items(stash_summary)
+    total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash_summary)
+    total_value = stash_market_value(stash_summary, (price_iron, price_gold, price_diamond))
+
     iron_parts = []
     if stash_summary.get("raw_iron_blocks"):
         iron_parts.append(f"{stash_summary['raw_iron_blocks']} raw")
-    if stash_summary["iron_blocks"]:
+    if stash_summary.get("iron_blocks"):
         iron_parts.append(f"{stash_summary['iron_blocks']}b")
-    if stash_summary["iron_ingots"]:
+    if stash_summary.get("iron_ingots"):
         iron_parts.append(f"{stash_summary['iron_ingots']}i")
     iron_display = " + ".join(iron_parts) if iron_parts else "0"
     gold_parts = []
     if stash_summary.get("raw_gold_blocks"):
         gold_parts.append(f"{stash_summary['raw_gold_blocks']} raw")
-    if stash_summary["gold_blocks"]:
+    if stash_summary.get("gold_blocks"):
         gold_parts.append(f"{stash_summary['gold_blocks']}b")
-    if stash_summary["gold_ingots"]:
+    if stash_summary.get("gold_ingots"):
         gold_parts.append(f"{stash_summary['gold_ingots']}i")
     gold_display = " + ".join(gold_parts) if gold_parts else "0"
     diamond_parts = []
-    if stash_summary["diamond_blocks"]:
+    if stash_summary.get("diamond_blocks"):
         diamond_parts.append(f"{stash_summary['diamond_blocks']}b")
-    if stash_summary["diamond_items"]:
+    if stash_summary.get("diamond_items"):
         diamond_parts.append(f"{stash_summary['diamond_items']}i")
     diamond_display = " + ".join(diamond_parts) if diamond_parts else "0"
     st.sidebar.caption(
@@ -171,7 +492,6 @@ if stash_summary.get("updated_at") != "never" and any(
         f"🟨 Gold: {gold_display}\n"
         f"💎 Diamond: {diamond_display}"
     )
-    total_value = total_iron * price_iron + total_gold * price_gold + total_diamond * price_diamond
     st.sidebar.metric("Total Value", f"${total_value:,.2f}")
     st.sidebar.caption(f"Updated: {stash_summary.get('updated_at', 'never')}")
 else:
@@ -182,99 +502,23 @@ st.sidebar.caption(f"Data cached for {_settings.CACHE_DURATION // 3600}h")
 st.sidebar.caption(f"Database: `{_settings.DB_FILE}`")
 
 
-# ---------------------------------------------------------------------------
-# Helper: compute deal result
-# ---------------------------------------------------------------------------
-def analyze_deal(
-    iron_ingots: float,
-    gold_ingots: float,
-    diamond_items: float,
-    p_iron: float,
-    p_gold: float,
-    p_diamond: float,
-    offered_price: float,
-) -> dict:
-    """Run the full deal analysis and return a results dict."""
-    total_market = (
-        iron_ingots * p_iron
-        + gold_ingots * p_gold
-        + diamond_items * p_diamond
-    )
-    min_needed = total_market * MarketDeal.MIN_ACCEPTABLE_PERCENT
-
-    profit_loss = offered_price - total_market
-    pct_of_market = (offered_price / total_market * 100) if total_market > 0 else 0
-
-    if offered_price >= total_market:
-        status = "ACCEPTED (PROFIT)"
-        status_color = "green"
-        status_msg = f"✅ SUPER DEAL! +{profit_loss:.2f}$ profit over market."
-    elif offered_price >= min_needed:
-        status = "ACCEPTED (BULK)"
-        status_color = "orange"
-        status_msg = f"🟡 OK! Within bulk discount ({abs(profit_loss):.2f}$ discount)."
-    else:
-        status = "REJECTED"
-        status_color = "red"
-        status_msg = f"❌ Too cheap! Need {min_needed - offered_price:.2f}$ more to your limit."
-
-    stacks = (iron_ingots + gold_ingots + diamond_items) / float(_settings.ITEMS_PER_STACK)
-    shulkers = (iron_ingots + gold_ingots + diamond_items) / float(_settings.ITEMS_PER_SHULKER)
-
-    # Counter-offer logic
-    counter_offer = None
-    if status == "REJECTED":
-        diamond_value = diamond_items * p_diamond
-        remaining = offered_price - diamond_value
-        total_metals = iron_ingots + gold_ingots
-        if total_metals > 0 and remaining > 0:
-            ratio = iron_ingots / total_metals
-            fair_metals = remaining / ((ratio * p_iron) + ((1 - ratio) * p_gold))
-            counter_offer = {
-                "iron": MarketDeal.format_bulk_storage(fair_metals * ratio),
-                "gold": MarketDeal.format_bulk_storage(fair_metals * (1 - ratio)),
-                "diamond": MarketDeal.format_bulk_storage(diamond_items, is_diamond=True),
-            }
-
-    return {
-        "total_market": total_market,
-        "min_needed": min_needed,
-        "offered": offered_price,
-        "pct_of_market": pct_of_market,
-        "profit_loss": profit_loss,
-        "status": status,
-        "status_color": status_color,
-        "status_msg": status_msg,
-        "stacks": stacks,
-        "shulkers": shulkers,
-        "counter_offer": counter_offer,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Helper: stash ingot equivalents
-# ---------------------------------------------------------------------------
-def stash_ingot_equivalents(stash: dict) -> tuple:
-    """Return (iron_ingots, gold_ingots, diamond_items) from stash dict."""
-    iron = stash["iron_blocks"] * _settings.INGOTS_PER_BLOCK + stash["iron_ingots"]
-    gold = stash["gold_blocks"] * _settings.INGOTS_PER_BLOCK + stash["gold_ingots"]
-    diamond = stash["diamond_blocks"] * _settings.INGOTS_PER_BLOCK + stash["diamond_items"]
-    return iron, gold, diamond
-
+# ═══════════════════════════════════════════════════════════════════════════
+# Shared helpers
+# ═══════════════════════════════════════════════════════════════════════════
 
 def _format_subtract_result(result: dict) -> str:
-    """Format a subtract_from_stash result dict into a readable string."""
+    """Format a stash subtraction result dict into a human-readable string."""
     parts = []
-    if result["iron_blocks"] or result["iron_ingots"]:
+    if result.get("iron_blocks") or result.get("iron_ingots"):
         parts.append(f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots")
-    if result["gold_blocks"] or result["gold_ingots"]:
+    if result.get("gold_blocks") or result.get("gold_ingots"):
         parts.append(f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots")
-    if result["diamond_blocks"] or result["diamond_items"]:
+    if result.get("diamond_blocks") or result.get("diamond_items"):
         parts.append(f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items")
     return " | ".join(parts)
 
 
-def _log_deal_with_all_fields(
+def _log_deal_with_all_fields(  # noqa: PLR0913 - many parameters needed for all deal fields
     iron_ingots: float,
     gold_ingots: float,
     diamond_items: float,
@@ -291,22 +535,21 @@ def _log_deal_with_all_fields(
     diamond_amount: float = 0.0,
     diamond_unit: str = "ingot",
 ) -> None:
-    """Log a deal including original amounts and units."""
+    ph = db._ph()
     profit = offered_price - market_value
-    from datetime import datetime
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = db.get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """INSERT INTO deals
-               (timestamp, iron_ingots, gold_ingots, diamond_items,
+            f"""INSERT INTO deals
+               (company_id, timestamp, iron_ingots, gold_ingots, diamond_items,
                 iron_price, gold_price, diamond_price,
                 market_value, offered_price, status, profit,
                 iron_amount, iron_unit, gold_amount, gold_unit,
                 diamond_amount, diamond_unit)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (date_str, iron_ingots, gold_ingots, diamond_items,
+               VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})""",
+            (company_id, date_str, iron_ingots, gold_ingots, diamond_items,
              iron_price, gold_price, diamond_price,
              market_value, offered_price, status, profit,
              iron_amount, iron_unit, gold_amount, gold_unit,
@@ -314,21 +557,19 @@ def _log_deal_with_all_fields(
         )
         conn.commit()
         conn.close()
-        import logging
         logging.getLogger(__name__).info("Deal logged to database: %s | %s", status, date_str)
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).error("Failed to log deal: %s", exc)
+        logging.getLogger(__name__).exception("Failed to log deal")
 
 
-def _handle_deal_logging(
-    iron_ingots: float,
-    gold_ingots: float,
-    diamond_items: float,
+def _handle_deal_logging(  # noqa: PLR0913 - many parameters needed for logging all deal details
+    iron_ingots_val: float,
+    gold_ingots_val: float,
+    diamond_items_val: float,
     result: dict,
-    price_iron: float,
-    price_gold: float,
-    price_diamond: float,
+    price_iron_local: float,
+    price_gold_local: float,
+    price_diamond_local: float,
     key_prefix: str,
     iron_amount_orig: float = 0.0,
     iron_unit_orig: str = "ingot",
@@ -337,14 +578,16 @@ def _handle_deal_logging(
     diamond_amount_orig: float = 0.0,
     diamond_unit_orig: str = "ingot",
 ) -> None:
-    """Show logging UI and handle log-to-database with optional manual status override."""
     st.markdown("---")
     st.subheader("💾 Save Deal")
+
+    if st.session_state.is_read_only:
+        st.info("🔒 Read-only mode — deals cannot be saved.")
+        return
 
     col_log1, col_log2 = st.columns([1, 1])
 
     with col_log1:
-        # Manual status override
         auto_status = result["status"]
         status_options = [
             f"Auto: {auto_status}",
@@ -372,28 +615,26 @@ def _handle_deal_logging(
         manual_offer = st.number_input(
             "Offered Price ($) (override if needed)",
             min_value=0.0, step=0.5,
-            value=result["offered"],
+            value=result["offered_price"],
             key=f"{key_prefix}_manual_offer",
         )
 
-    # Use a button instead of checkbox to avoid double-logging on reruns
     log_clicked = st.button("💾 Log this deal to database", key=f"{key_prefix}_log_btn", use_container_width=True)
 
     if log_clicked:
         _log_deal_with_all_fields(
-            iron_ingots, gold_ingots, diamond_items,
-            result["total_market"], manual_offer, final_status,
-            price_iron, price_gold, price_diamond,
+            iron_ingots_val, gold_ingots_val, diamond_items_val,
+            result["market_value"], manual_offer, final_status,
+            price_iron_local, price_gold_local, price_diamond_local,
             iron_amount_orig, iron_unit_orig,
             gold_amount_orig, gold_unit_orig,
             diamond_amount_orig, diamond_unit_orig,
         )
         st.success(f"✅ Deal logged to database as '{final_status}'!")
 
-    # Stash subtraction
-    auto_sub = db.get_auto_subtract()
+    auto_sub = db.get_auto_subtract(company_id=company_id)
     if auto_sub:
-        sub_result = db.subtract_from_stash(int(iron_ingots), int(gold_ingots), int(diamond_items))
+        sub_result = db.subtract_from_stash(int(iron_ingots_val), int(gold_ingots_val), int(diamond_items_val), company_id=company_id)
         st.info(f"📦 Auto-subtracted from stash: {_format_subtract_result(sub_result)}")
     else:
         col_sub1, col_sub2 = st.columns([1, 1])
@@ -404,22 +645,106 @@ def _handle_deal_logging(
                 key=f"{key_prefix}_subtract",
             )
         if subtract_choice:
-            sub_result = db.subtract_from_stash(int(iron_ingots), int(gold_ingots), int(diamond_items))
+            sub_result = db.subtract_from_stash(int(iron_ingots_val), int(gold_ingots_val), int(diamond_items_val), company_id=company_id)
             st.info(f"✅ Subtracted from stash: {_format_subtract_result(sub_result)}")
 
     return final_status
 
 
-# ===========================================================================
-# PAGE: Deal Calculator
-# ===========================================================================
-if page == "💰 Deal Calculator":
+# ── Page routing ──────────────────────────────────────────────────────────
+
+if page == "🏢 Company Management":
+    st.header("🏢 Company Management")
+    if not st.session_state.is_admin:
+        st.error("Access denied. Admin only.")
+        st.stop()
+
+    companies = db.list_all_companies()
+    if not companies:
+        st.info("No companies registered yet.")
+        st.stop()
+
+    df = pd.DataFrame(companies)
+    display_cols = ["id", "discord_username", "company_name", "tier", "access_expires_at", "is_active", "trial_used"]
+    df_display = df[[c for c in display_cols if c in df.columns]]
+    df_display = df_display.rename(columns={
+        "id": "ID",
+        "discord_username": "Discord",
+        "company_name": "Company Name",
+        "tier": "Tier",
+        "access_expires_at": "Access Expires",
+        "is_active": "Active",
+        "trial_used": "Trial Used",
+    })
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.subheader("⭐ Set Company Tier")
+    tier_id = st.number_input("Company ID to change tier:", min_value=1, step=1, value=1, key="tier_id")
+    target_company = db.get_company_by_id(tier_id)
+    if target_company:
+        current_tier = target_company.get("tier", "free")
+        st.write(f"Current tier: **{current_tier}**")
+        new_tier = st.selectbox("New tier:", ["free", "premium"], index=0 if current_tier == "free" else 1, key="tier_select")
+        if st.button("⭐ Set Tier", type="primary", use_container_width=True):
+            if db.set_company_tier(tier_id, new_tier):
+                st.success(f"✅ Company #{tier_id} tier set to '{new_tier}'!")
+                st.rerun()
+            else:
+                st.error("Failed to set tier.")
+    else:
+        st.warning("Company not found.")
+
+    st.markdown("---")
+    st.subheader("🔍 View Company Data")
+    company_options = {f"#{c['id']} – {c.get('discord_username', '?')} ({c.get('company_name', '')})": c["id"] for c in companies}
+    selected_label = st.selectbox("Select a company to inspect:", list(company_options.keys()), key="admin_company_select")
+    selected_id = company_options[selected_label]
+    if st.button("📂 View this company", type="primary", use_container_width=True):
+        st.session_state.selected_admin_company = selected_id
+        st.success(f"Now viewing company #{selected_id}.")
+        st.rerun()
+    if st.session_state.selected_admin_company is not None:
+        if st.button("🔄 Back to my own data"):
+            st.session_state.selected_admin_company = None
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("🕐 Extend / Deactivate")
+    target_id = st.number_input("Company ID to modify:", min_value=1, step=1, value=1)
+    col_ext, col_deact = st.columns(2)
+    with col_ext:
+        days = st.number_input("Days to extend:", min_value=1, step=1, value=30)
+        if st.button("➕ Extend Access", type="primary", use_container_width=True):
+            if db.update_company_access(target_id, days):
+                st.success(f"✅ Company #{target_id} access extended by {days} days!")
+                st.rerun()
+            else:
+                st.error("Failed to extend access.")
+    with col_deact:
+        if st.button("⛔ Deactivate Company", type="secondary", use_container_width=True):
+            if db.deactivate_company(target_id):
+                st.success(f"✅ Company #{target_id} deactivated!")
+                st.rerun()
+            else:
+                st.error("Failed to deactivate.")
+
+    st.markdown("---")
+    st.subheader("🔑 Regenerate API Key")
+    regen_id = st.number_input("Company ID to regenerate key for:", min_value=1, step=1, value=1)
+    if st.button("🔄 Regenerate Key", type="secondary"):
+        new_key = db.regenerate_api_key(regen_id)
+        if new_key:
+            st.success(f"✅ New API key for company #{regen_id}: `{new_key}`")
+        else:
+            st.error("Failed to regenerate key.")
+
+elif page == "💰 Deal Calculator":
     st.header("💰 Deal Calculator")
     st.markdown("Enter raw material amounts and their units.")
 
-    # Load from stash option
     load_from_stash = st.checkbox("📦 Load values from stash", value=False, key="deal_load_stash")
-    stash = db.load_stash() if load_from_stash else None
+    stash = db.load_stash(company_id=company_id) if load_from_stash else None
 
     default_iron = 0.0
     default_gold = 0.0
@@ -440,7 +765,6 @@ if page == "💰 Deal Calculator":
         else:
             st.warning("⚠ Stash is empty. Enter values manually.")
 
-    # Keep original user-input amounts (before conversion) for the log
     if "deal_iron_amount_orig" not in st.session_state:
         st.session_state.deal_iron_amount_orig = 0.0
     if "deal_iron_unit_orig" not in st.session_state:
@@ -475,16 +799,14 @@ if page == "💰 Deal Calculator":
         "💰 Offered price ($)", min_value=0.0, step=0.5, value=0.0, key="deal_offer"
     )
 
-    # Use session state to persist deal result across reruns
     if "deal_result" not in st.session_state:
         st.session_state.deal_result = None
 
-    if st.button("📊 Calculate Deal", type="primary", use_container_width=True):
-        iron_ingots = MarketDeal.convert_to_ingots(iron_amount, iron_unit)
-        gold_ingots = MarketDeal.convert_to_ingots(gold_amount, gold_unit)
-        diamond_items = MarketDeal.convert_to_ingots(diamond_amount, diamond_unit)
+    if st.button("📊 Calculate Deal", type="primary", use_container_width=True, disabled=False):
+        iron_ingots_val = MarketDeal.convert_to_ingots(iron_amount, iron_unit)
+        gold_ingots_val = MarketDeal.convert_to_ingots(gold_amount, gold_unit)
+        diamond_items_val = MarketDeal.convert_to_ingots(diamond_amount, diamond_unit)
 
-        # Store original amounts for logging
         st.session_state.deal_iron_amount_orig = iron_amount
         st.session_state.deal_iron_unit_orig = iron_unit
         st.session_state.deal_gold_amount_orig = gold_amount
@@ -492,75 +814,58 @@ if page == "💰 Deal Calculator":
         st.session_state.deal_diamond_amount_orig = diamond_amount
         st.session_state.deal_diamond_unit_orig = diamond_unit
 
-        if iron_ingots == 0 and gold_ingots == 0 and diamond_items == 0:
+        if iron_ingots_val == 0 and gold_ingots_val == 0 and diamond_items_val == 0:
             st.warning("Please enter at least some materials.")
             st.session_state.deal_result = None
         else:
             result = analyze_deal(
-                iron_ingots, gold_ingots, diamond_items,
+                iron_ingots_val, gold_ingots_val, diamond_items_val,
                 price_iron, price_gold, price_diamond,
-                offered_price,
+                offered_price=offered_price,
             )
             st.session_state.deal_result = {
-                "iron_ingots": iron_ingots,
-                "gold_ingots": gold_ingots,
-                "diamond_items": diamond_items,
+                "iron_ingots": iron_ingots_val,
+                "gold_ingots": gold_ingots_val,
+                "diamond_items": diamond_items_val,
                 "result": result,
                 "price_iron": price_iron,
                 "price_gold": price_gold,
                 "price_diamond": price_diamond,
             }
 
-    # Display result from session state (persists across reruns)
     if st.session_state.deal_result is not None:
         d = st.session_state.deal_result
-        iron_ingots = d["iron_ingots"]
-        gold_ingots = d["gold_ingots"]
-        diamond_items = d["diamond_items"]
+        iron_ingots_val = d["iron_ingots"]
+        gold_ingots_val = d["gold_ingots"]
+        diamond_items_val = d["diamond_items"]
         result = d["result"]
-        price_iron = d["price_iron"]
-        price_gold = d["price_gold"]
-        price_diamond = d["price_diamond"]
 
         st.markdown("---")
         col_a, col_b, col_c = st.columns(3)
-        col_a.metric("Market Value", f"${result['total_market']:.2f}")
-        col_b.metric("Your Offer", f"${result['offered']:.2f}")
-        col_c.metric(
-            "Profit / Loss",
-            f"${result['profit_loss']:.2f}",
-            delta=f"${result['profit_loss']:.2f}",
-        )
+        col_a.metric("Market Value", f"${result['market_value']:.2f}")
+        col_b.metric("Your Offer", f"${result['offered_price']:.2f}")
+        col_c.metric("Profit / Loss", f"${result['profit_loss']:.2f}", delta=f"${result['profit_loss']:.2f}")
 
         st.markdown(f"### {result['status']}")
         st.markdown(f"**{result['status_msg']}**")
-        st.markdown(f"Your offer is **{result['pct_of_market']:.1f}%** of market value.")
-        st.markdown(
-            f"Minimum acceptable ({MarketDeal.MIN_ACCEPTABLE_PERCENT*100:.0f}%): "
-            f"**${result['min_needed']:.2f}**"
-        )
+        st.markdown(f"Your offer is **{result['percent_of_market']:.1f}%** of market value.")
+        st.markdown(f"Minimum acceptable ({MarketDeal.MIN_ACCEPTABLE_PERCENT*100:.0f}%): **${result['min_needed_price']:.2f}**")
 
         st.markdown("#### Logistics")
         st.write(f"~{result['stacks']:.1f} stacks ({result['shulkers']:.2f} shulker boxes)")
         if result['stacks'] > 0:
-            st.write(
-                f"${result['profit_loss']/result['stacks']:.2f} per stack | "
-                f"${result['profit_loss']/result['shulkers']:.2f} per shulker"
-            )
+            st.write(f"${result['profit_loss']/result['stacks']:.2f} per stack | ${result['profit_loss']/result['shulkers']:.2f} per shulker")
 
-        if result["counter_offer"]:
+        if result.get("counter_offer"):
             st.markdown("#### 💡 Counter-Offer Suggestion")
             co = result["counter_offer"]
-            st.info(
-                f"For ${result['offered']:.0f}, offer instead:\n"
-                f"- Iron: {co['iron']}\n"
-                f"- Gold: {co['gold']}\n"
-                f"- Diamonds: {co['diamond']} (unchanged)"
-            )
+            iron_part = MarketDeal.format_bulk_storage(co["iron"]) if co.get("iron", 0) > 0 else "0"
+            gold_part = MarketDeal.format_bulk_storage(co["gold"]) if co.get("gold", 0) > 0 else "0"
+            diamond_part = MarketDeal.format_bulk_storage(co["diamond"], is_diamond=True) if co.get("diamond", 0) > 0 else "0"
+            st.info(f"For ${result['offered_price']:.0f}, offer instead:\n- Iron: {iron_part}\n- Gold: {gold_part}\n- Diamonds: {diamond_part} (unchanged)")
 
-        # Deal logging UI with manual status override
         _handle_deal_logging(
-            iron_ingots, gold_ingots, diamond_items,
+            iron_ingots_val, gold_ingots_val, diamond_items_val,
             result, price_iron, price_gold, price_diamond,
             "deal",
             iron_amount_orig=st.session_state.deal_iron_amount_orig,
@@ -571,38 +876,30 @@ if page == "💰 Deal Calculator":
             diamond_unit_orig=st.session_state.deal_diamond_unit_orig,
         )
 
-
-# ===========================================================================
-# PAGE: Shulker Scanner
-# ===========================================================================
 elif page == "📦 Shulker Scanner":
     st.header("📦 Shulker Scanner")
     st.markdown("Enter materials as full stacks + remainder for blocks and items.")
 
-    # Load from stash option
     load_from_stash = st.checkbox("📦 Load values from stash", value=False, key="shulker_load_stash")
-    stash = db.load_stash() if load_from_stash else None
+    stash = db.load_stash(company_id=company_id) if load_from_stash else None
 
-    # Default values from stash
     di_blocks_stacks_default = 0
     di_blocks_rest_default = 0
     di_items_stacks_default = 0
     di_items_rest_default = 0
-
     ir_blocks_stacks_default = 0
     ir_blocks_rest_default = 0
     ir_items_stacks_default = 0
     ir_items_rest_default = 0
-
     go_blocks_stacks_default = 0
     go_blocks_rest_default = 0
     go_items_stacks_default = 0
     go_items_rest_default = 0
 
     if stash and stash.get("updated_at") != "never":
-        has_values = stash["iron_blocks"] > 0 or stash["iron_ingots"] > 0 or \
-                     stash["gold_blocks"] > 0 or stash["gold_ingots"] > 0 or \
-                     stash["diamond_blocks"] > 0 or stash["diamond_items"] > 0
+        has_values = stash.get("iron_blocks", 0) > 0 or stash.get("iron_ingots", 0) > 0 or \
+                     stash.get("gold_blocks", 0) > 0 or stash.get("gold_ingots", 0) > 0 or \
+                     stash.get("diamond_blocks", 0) > 0 or stash.get("diamond_items", 0) > 0
         if has_values:
             st.info(
                 f"📦 Loaded from stash: "
@@ -610,17 +907,14 @@ elif page == "📦 Shulker Scanner":
                 f"Gold: {stash['gold_blocks']} blocks + {stash['gold_ingots']} ingots, "
                 f"Diamonds: {stash['diamond_blocks']} blocks + {stash['diamond_items']} items"
             )
-            # Convert stash block counts to stacks (assuming each 9 blocks form 1 stack of blocks)
             di_blocks_stacks_default = stash["diamond_blocks"] // 64
             di_blocks_rest_default = stash["diamond_blocks"] % 64
             di_items_stacks_default = stash["diamond_items"] // 64
             di_items_rest_default = stash["diamond_items"] % 64
-
             ir_blocks_stacks_default = stash["iron_blocks"] // 64
             ir_blocks_rest_default = stash["iron_blocks"] % 64
             ir_items_stacks_default = stash["iron_ingots"] // 64
             ir_items_rest_default = stash["iron_ingots"] % 64
-
             go_blocks_stacks_default = stash["gold_blocks"] // 64
             go_blocks_rest_default = stash["gold_blocks"] % 64
             go_items_stacks_default = stash["gold_ingots"] // 64
@@ -654,92 +948,61 @@ elif page == "📦 Shulker Scanner":
         go_items_rest = st.number_input("Remainder GOLD ITEMS (0-63)", min_value=0, max_value=63, step=1, key="go_i_r", value=go_items_rest_default)
         total_gold = (go_blocks_stacks * 64 + go_blocks_rest) * 9 + (go_items_stacks * 64 + go_items_rest)
 
-    multiplier = st.number_input("Multiplier (how many times this chest config is delivered)", min_value=1, step=1, value=1)
+    multiplier = st.number_input("Multiplier", min_value=1, step=1, value=1)
+    offered_price = st.number_input("💰 Offered price ($)", min_value=0.0, step=0.5, value=0.0, key="shulker_offer")
 
-    offered_price = st.number_input(
-        "💰 Offered price ($)", min_value=0.0, step=0.5, value=0.0, key="shulker_offer"
-    )
-
-    # Use session state to persist shulker result across reruns
     if "shulker_result" not in st.session_state:
         st.session_state.shulker_result = None
 
     if st.button("📊 Scan Shulker", type="primary", use_container_width=True):
-        iron_ingots = total_iron * multiplier
-        gold_ingots = total_gold * multiplier
-        diamond_items = total_diamond * multiplier
+        iron_ingots_val = total_iron * multiplier
+        gold_ingots_val = total_gold * multiplier
+        diamond_items_val = total_diamond * multiplier
 
-        if iron_ingots == 0 and gold_ingots == 0 and diamond_items == 0:
+        if iron_ingots_val == 0 and gold_ingots_val == 0 and diamond_items_val == 0:
             st.warning("Please enter at least some materials.")
             st.session_state.shulker_result = None
         else:
-            result = analyze_deal(
-                iron_ingots, gold_ingots, diamond_items,
-                price_iron, price_gold, price_diamond,
-                offered_price,
-            )
+            result = analyze_deal(iron_ingots_val, gold_ingots_val, diamond_items_val, price_iron, price_gold, price_diamond, offered_price=offered_price)
             st.session_state.shulker_result = {
-                "iron_ingots": iron_ingots,
-                "gold_ingots": gold_ingots,
-                "diamond_items": diamond_items,
-                "result": result,
-                "price_iron": price_iron,
-                "price_gold": price_gold,
-                "price_diamond": price_diamond,
+                "iron_ingots": iron_ingots_val, "gold_ingots": gold_ingots_val, "diamond_items": diamond_items_val,
+                "result": result, "price_iron": price_iron, "price_gold": price_gold, "price_diamond": price_diamond,
             }
 
-    # Display result from session state (persists across reruns)
     if st.session_state.shulker_result is not None:
         d = st.session_state.shulker_result
-        iron_ingots = d["iron_ingots"]
-        gold_ingots = d["gold_ingots"]
-        diamond_items = d["diamond_items"]
+        iron_ingots_val = d["iron_ingots"]
+        gold_ingots_val = d["gold_ingots"]
+        diamond_items_val = d["diamond_items"]
         result = d["result"]
-        price_iron = d["price_iron"]
-        price_gold = d["price_gold"]
-        price_diamond = d["price_diamond"]
 
         st.markdown("---")
-        st.write(f"Iron: {MarketDeal.format_bulk_storage(iron_ingots)}")
-        st.write(f"Gold: {MarketDeal.format_bulk_storage(gold_ingots)}")
-        st.write(f"Diamonds: {MarketDeal.format_bulk_storage(diamond_items, is_diamond=True)}")
+        st.write(f"Iron: {MarketDeal.format_bulk_storage(iron_ingots_val)}")
+        st.write(f"Gold: {MarketDeal.format_bulk_storage(gold_ingots_val)}")
+        st.write(f"Diamonds: {MarketDeal.format_bulk_storage(diamond_items_val, is_diamond=True)}")
 
         col_a, col_b, col_c = st.columns(3)
-        col_a.metric("Market Value", f"${result['total_market']:.2f}")
-        col_b.metric("Your Offer", f"${result['offered']:.2f}")
+        col_a.metric("Market Value", f"${result['market_value']:.2f}")
+        col_b.metric("Your Offer", f"${result['offered_price']:.2f}")
         col_c.metric("Profit / Loss", f"${result['profit_loss']:.2f}", delta=f"${result['profit_loss']:.2f}")
 
         st.markdown(f"### {result['status']}")
         st.markdown(f"**{result['status_msg']}**")
-
         st.markdown("#### Logistics")
         st.write(f"~{result['stacks']:.1f} stacks ({result['shulkers']:.2f} shulker boxes)")
 
-        if result["counter_offer"]:
+        if result.get("counter_offer"):
             st.markdown("#### 💡 Counter-Offer")
             co = result["counter_offer"]
-            st.info(
-                f"For ${result['offered']:.0f}, offer instead:\n"
-                f"- Iron: {co['iron']}\n"
-                f"- Gold: {co['gold']}\n"
-                f"- Diamonds: {co['diamond']}"
-            )
+            iron_part = MarketDeal.format_bulk_storage(co["iron"]) if co.get("iron", 0) > 0 else "0"
+            gold_part = MarketDeal.format_bulk_storage(co["gold"]) if co.get("gold", 0) > 0 else "0"
+            diamond_part = MarketDeal.format_bulk_storage(co["diamond"], is_diamond=True) if co.get("diamond", 0) > 0 else "0"
+            st.info(f"For ${result['offered_price']:.0f}, offer instead:\n- Iron: {iron_part}\n- Gold: {gold_part}\n- Diamonds: {diamond_part}")
 
-        # Deal logging UI with manual status override
-        _handle_deal_logging(
-            iron_ingots, gold_ingots, diamond_items,
-            result, price_iron, price_gold, price_diamond,
-            "shulker",
-        )
+        _handle_deal_logging(iron_ingots_val, gold_ingots_val, diamond_items_val, result, price_iron, price_gold, price_diamond, "shulker")
 
-
-# ===========================================================================
-# PAGE: Quick Converter
-# ===========================================================================
 elif page == "⚡ Quick Converter":
     st.header("⚡ Quick Converter")
-    st.markdown("Convert item amounts between blocks, stacks, and shulkers.")
-
     base_amount = st.number_input("Amount per load", min_value=1, step=100, value=1500)
     multiplier = st.number_input("Multiplier", min_value=1, step=1, value=1)
 
@@ -750,7 +1013,6 @@ elif page == "⚡ Quick Converter":
         stacks = amount // _settings.ITEMS_PER_STACK
         rest_items = amount % _settings.ITEMS_PER_STACK
         shulkers = amount / _settings.ITEMS_PER_SHULKER
-
         iron_value = amount * price_iron
         gold_value = amount * price_gold
         diamond_value = amount * price_diamond
@@ -766,17 +1028,12 @@ elif page == "⚡ Quick Converter":
         col_b.metric("Gold", f"${gold_value:,.2f}")
         col_c.metric("Diamond", f"${diamond_value:,.2f}")
 
-
-# ===========================================================================
-# PAGE: Deal History
-# ===========================================================================
 elif page == "📊 Deal History":
     st.header("📊 Deal History")
 
-    stats = db.get_deal_stats()
-    deals = db.get_all_deals(limit=200)
+    stats = db.get_deal_stats(company_id=company_id)
+    deals = db.get_all_deals(limit=200, company_id=company_id)
 
-    # Stats row
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Total Deals", stats["total_deals"])
     col2.metric("Accepted", stats["accepted"])
@@ -787,8 +1044,6 @@ elif page == "📊 Deal History":
 
     if deals:
         df = pd.DataFrame(deals)
-
-        # Profit chart
         df_chart = df.copy()
         df_chart["Date/Time"] = pd.to_datetime(df_chart["timestamp"])
         df_chart = df_chart.sort_values("Date/Time").reset_index(drop=True)
@@ -798,99 +1053,64 @@ elif page == "📊 Deal History":
         chart_data = df_chart[["Deal #", "profit"]].rename(columns={"profit": "Profit ($)"})
         st.line_chart(chart_data.set_index("Deal #"))
 
-        # Deal table with action buttons
         st.subheader("📋 All Deals")
-        df_display = df.drop(columns=["id", "iron_amount", "iron_unit", "gold_amount", "gold_unit", "diamond_amount", "diamond_unit"], errors="ignore")
+        df_display = df.drop(columns=["id", "company_id", "iron_amount", "iron_unit", "gold_amount", "gold_unit", "diamond_amount", "diamond_unit"], errors="ignore")
         df_display = df_display.rename(columns={
-            "timestamp": "Date/Time",
-            "iron_ingots": "Iron",
-            "gold_ingots": "Gold",
-            "diamond_items": "Diamonds",
-            "market_value": "Market Value",
-            "offered_price": "Offered",
-            "status": "Status",
-            "profit": "Profit",
+            "timestamp": "Date/Time", "iron_ingots": "Iron", "gold_ingots": "Gold",
+            "diamond_items": "Diamonds", "market_value": "Market Value",
+            "offered_price": "Offered", "status": "Status", "profit": "Profit",
         })
         df_display["Date/Time"] = pd.to_datetime(df_display["Date/Time"])
         df_display = df_display.sort_values("Date/Time", ascending=False)
-
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-        # Download button
         csv = df_display.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "⬇ Download CSV",
-            csv,
-            "dc_trade_deals.csv",
-            "text/csv",
-        )
+        st.download_button("⬇ Download CSV", csv, "dc_trade_deals.csv", "text/csv")
 
-        st.markdown("---")
-        st.subheader("✏️ Edit or Delete a Deal")
+        if not st.session_state.is_read_only:
+            st.markdown("---")
+            st.subheader("✏️ Edit or Delete a Deal")
+            deal_options = {f"#{d['id']} – {d['status']} ({d['timestamp']})": d['id'] for d in deals[:50]}
+            selected_label = st.selectbox("Select a deal to edit:", list(deal_options.keys()), key="deal_edit_select")
+            selected_id = deal_options[selected_label]
+            selected_deal = next((d for d in deals if d['id'] == selected_id), None)
+            if selected_deal:
+                col_edit1, col_edit2, col_edit3 = st.columns([2, 2, 1])
+                with col_edit1:
+                    new_status = st.text_input("New status:", value=selected_deal["status"], key="deal_edit_status")
+                with col_edit2:
+                    new_offer = st.number_input("New offered price ($):", min_value=0.0, step=0.5, value=float(selected_deal["offered_price"]), key="deal_edit_offer")
+                with col_edit3:
+                    st.markdown("##### &nbsp;")
+                    if st.button("💾 Update Deal", key="deal_edit_update", use_container_width=True):
+                        if db.update_deal(selected_id, new_status, new_offer, company_id=company_id):
+                            st.success(f"✅ Deal #{selected_id} updated!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to update deal.")
 
-        # Select deal to edit
-        deal_options = {f"#{d['id']} – {d['status']} ({d['timestamp']})": d['id'] for d in deals[:50]}
-        selected_label = st.selectbox("Select a deal to edit:", list(deal_options.keys()), key="deal_edit_select")
-        selected_id = deal_options[selected_label]
-
-        # Find the selected deal
-        selected_deal = next((d for d in deals if d['id'] == selected_id), None)
-        if selected_deal:
-            col_edit1, col_edit2, col_edit3 = st.columns([2, 2, 1])
-            with col_edit1:
-                new_status = st.text_input("New status:", value=selected_deal["status"], key="deal_edit_status")
-            with col_edit2:
-                new_offer = st.number_input("New offered price ($):", min_value=0.0, step=0.5, value=float(selected_deal["offered_price"]), key="deal_edit_offer")
-            with col_edit3:
-                st.markdown("##### &nbsp;")
-                if st.button("💾 Update Deal", key="deal_edit_update", use_container_width=True):
-                    if db.update_deal(selected_id, new_status, new_offer):
-                        st.success(f"✅ Deal #{selected_id} updated!")
+                if st.button("🗑️ Delete Deal", key=f"deal_delete_{selected_id}", type="secondary"):
+                    if db.delete_deal(selected_id, company_id=company_id):
+                        st.success(f"✅ Deal #{selected_id} deleted!")
                         st.rerun()
                     else:
-                        st.error("❌ Failed to update deal.")
-
-            if st.button("🗑️ Delete Deal", key=f"deal_delete_{selected_id}", type="secondary"):
-                if db.delete_deal(selected_id):
-                    st.success(f"✅ Deal #{selected_id} deleted!")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to delete deal.")
+                        st.error("❌ Failed to delete deal.")
     else:
         st.info("No deals logged yet. Use one of the calculators above!")
 
-
-# ===========================================================================
-# PAGE: Stash Manager
-# ===========================================================================
 elif page == "📦 Stash Manager":
     st.header("📦 Stash Manager")
-    st.markdown("Save and manage your current inventory for quick access.")
+    stash = db.load_stash(company_id=company_id)
 
-    stash = db.load_stash()
+    total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
 
-    # Helper: ingot totals including raw blocks (treated as same value)
-    def _total_iron(s: dict) -> int:
-        return (s.get("iron_blocks", 0) + s.get("raw_iron_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("iron_ingots", 0)
-    def _total_gold(s: dict) -> int:
-        return (s.get("gold_blocks", 0) + s.get("raw_gold_blocks", 0)) * _settings.INGOTS_PER_BLOCK + s.get("gold_ingots", 0)
-    def _total_diamond(s: dict) -> int:
-        return s.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK + s.get("diamond_items", 0)
-
-    total_iron = _total_iron(stash)
-    total_gold = _total_gold(stash)
-    total_diamond = _total_diamond(stash)
-
-    # Market value
     iron_value = total_iron * price_iron
     gold_value = total_gold * price_gold
     diamond_value = total_diamond * price_diamond
     total_value = iron_value + gold_value + diamond_value
 
-    stacks = (total_iron + total_gold + total_diamond) / float(_settings.ITEMS_PER_STACK)
-    shulkers = (total_iron + total_gold + total_diamond) / float(_settings.ITEMS_PER_SHULKER)
+    stacks, shulkers = total_stash_shipping(stash)
 
-    # Display current stash
     st.subheader("📦 Current Stash")
     last_updated = stash.get("updated_at", "never")
     st.caption(f"Last updated: {last_updated}")
@@ -908,25 +1128,52 @@ elif page == "📦 Stash Manager":
     col_b.metric("Iron Value", f"${iron_value:,.2f}")
     col_c.metric("Gold Value", f"${gold_value:,.2f}")
     col_d.metric("Diamond Value", f"${diamond_value:,.2f}")
-
     st.caption(f"🚚 Shipping: ~{stacks:.1f} stacks (~{shulkers:.2f} shulker boxes)")
 
     st.markdown("---")
+    st.subheader("🔗 Public Stash Link")
+    _company = db.get_company_by_id(company_id)
+    public_token = (_company or {}).get("public_stash_token", "")
+    if public_token:
+        api_host = os.getenv("API_HOST", "localhost")
+        api_port = os.getenv("API_PORT", "8000")
+        public_url = f"http://{api_host}:{api_port}/stash/public/{public_token}"
+        st.success("✅ Public stash is enabled!")
+        st.code(public_url, language="text")
+        st.caption("Share this URL with customers. No API key needed.")
+        read_only = st.session_state.is_read_only
+        if st.button("🔄 Regenerate Token", disabled=read_only):
+            new_token = db.generate_public_stash_token(company_id)
+            if new_token:
+                st.success("🆕 New public stash token generated!")
+                st.rerun()
+    else:
+        st.info("🔒 No public stash link — customers need an API key to view your stash.")
+        read_only = st.session_state.is_read_only
+        if st.button("🔓 Enable Public Stash Link", disabled=read_only):
+            new_token = db.generate_public_stash_token(company_id)
+            if new_token:
+                st.success("✅ Public stash link enabled!")
+                st.rerun()
 
-    # Update stash form
+    st.markdown("---")
+
+    read_only = st.session_state.is_read_only
+    if read_only:
+        st.info("🔒 Read-only mode — stash modifications are disabled.")
+
     st.subheader("✏️ Update Stash")
-    st.markdown("Enter your current inventory (values in blocks / ingots / items, NOT stacks)")
 
-    # Auto-subtract toggle
     auto_sub = bool(stash.get("auto_subtract", 0))
     col_toggle1, col_toggle2 = st.columns([1, 3])
     with col_toggle1:
         new_auto_sub = st.checkbox("🔁 Auto-subtract", value=auto_sub,
-                                   help="When enabled, materials are automatically subtracted from stash after every deal.")
+                                   help="When enabled, materials are automatically subtracted from stash after every deal.",
+                                   disabled=read_only)
     with col_toggle2:
         st.caption("When enabled, deal materials are automatically deducted from stash without asking.")
-    if new_auto_sub != auto_sub:
-        db.set_auto_subtract(new_auto_sub)
+    if new_auto_sub != auto_sub and not read_only:
+        db.set_auto_subtract(new_auto_sub, company_id=company_id)
         st.success(f"Auto-subtract is now {'ON' if new_auto_sub else 'OFF'}!")
         st.rerun()
 
@@ -935,39 +1182,31 @@ elif page == "📦 Stash Manager":
     with st.form("stash_form"):
         col_i1, col_i2 = st.columns(2)
         with col_i1:
-            iron_blocks = st.number_input("Iron blocks", min_value=0, step=1, value=int(stash["iron_blocks"]))
+            iron_blocks = st.number_input("Iron blocks", min_value=0, step=1, value=int(stash.get("iron_blocks", 0)))
             raw_iron_blocks = st.number_input("Raw iron blocks", min_value=0, step=1, value=int(stash.get("raw_iron_blocks", 0)))
-            gold_blocks = st.number_input("Gold blocks", min_value=0, step=1, value=int(stash["gold_blocks"]))
+            gold_blocks = st.number_input("Gold blocks", min_value=0, step=1, value=int(stash.get("gold_blocks", 0)))
             raw_gold_blocks = st.number_input("Raw gold blocks", min_value=0, step=1, value=int(stash.get("raw_gold_blocks", 0)))
-            diamond_blocks = st.number_input("Diamond blocks", min_value=0, step=1, value=int(stash["diamond_blocks"]))
+            diamond_blocks = st.number_input("Diamond blocks", min_value=0, step=1, value=int(stash.get("diamond_blocks", 0)))
         with col_i2:
-            iron_ingots = st.number_input("Iron ingots", min_value=0, step=1, value=int(stash["iron_ingots"]))
-            gold_ingots = st.number_input("Gold ingots", min_value=0, step=1, value=int(stash["gold_ingots"]))
-            diamond_items = st.number_input("Diamond items", min_value=0, step=1, value=int(stash["diamond_items"]))
+            iron_ingots = st.number_input("Iron ingots", min_value=0, step=1, value=int(stash.get("iron_ingots", 0)))
+            gold_ingots = st.number_input("Gold ingots", min_value=0, step=1, value=int(stash.get("gold_ingots", 0)))
+            diamond_items = st.number_input("Diamond items", min_value=0, step=1, value=int(stash.get("diamond_items", 0)))
 
-        submitted = st.form_submit_button("💾 Save Stash", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("💾 Save Stash", type="primary", use_container_width=True, disabled=read_only)
 
-    if submitted:
+    if submitted and not read_only:
         new_stash = {
-            "iron_blocks": iron_blocks,
-            "raw_iron_blocks": raw_iron_blocks,
-            "iron_ingots": iron_ingots,
-            "gold_blocks": gold_blocks,
-            "raw_gold_blocks": raw_gold_blocks,
-            "gold_ingots": gold_ingots,
-            "diamond_blocks": diamond_blocks,
-            "diamond_items": diamond_items,
+            "iron_blocks": iron_blocks, "raw_iron_blocks": raw_iron_blocks, "iron_ingots": iron_ingots,
+            "gold_blocks": gold_blocks, "raw_gold_blocks": raw_gold_blocks, "gold_ingots": gold_ingots,
+            "diamond_blocks": diamond_blocks, "diamond_items": diamond_items,
             "auto_subtract": 1 if new_auto_sub else 0,
         }
-        db.save_stash(new_stash)
+        db.save_stash(new_stash, company_id=company_id)
         st.success("✅ Stash saved!")
         st.rerun()
 
     st.markdown("---")
-
-    # Add to stash section
     st.subheader("➕ Add Materials to Stash")
-    st.markdown("Enter positive values to add to your existing stash.")
     with st.form("add_stash_form"):
         col_i1, col_i2 = st.columns(2)
         with col_i1:
@@ -979,22 +1218,15 @@ elif page == "📦 Stash Manager":
             add_gold_ingots = st.number_input("Gold ingots to add", min_value=0, step=1, value=0)
             add_diamond_items = st.number_input("Diamond items to add", min_value=0, step=1, value=0)
 
-        add_submitted = st.form_submit_button("➕ Add to Stash", type="secondary", use_container_width=True)
+        add_submitted = st.form_submit_button("➕ Add to Stash", type="secondary", use_container_width=True, disabled=read_only)
 
-    if add_submitted:
-        has_values = any([
-            add_iron_blocks, add_iron_ingots, add_gold_blocks,
-            add_gold_ingots, add_diamond_blocks, add_diamond_items,
-        ])
+    if add_submitted and not read_only:
+        has_values = any([add_iron_blocks, add_iron_ingots, add_gold_blocks, add_gold_ingots, add_diamond_blocks, add_diamond_items])
         if has_values:
-            db.add_to_stash(
-                iron_blocks=add_iron_blocks,
-                iron_ingots=add_iron_ingots,
-                gold_blocks=add_gold_blocks,
-                gold_ingots=add_gold_ingots,
-                diamond_blocks=add_diamond_blocks,
-                diamond_items=add_diamond_items,
-            )
+            db.add_to_stash(iron_blocks=add_iron_blocks, iron_ingots=add_iron_ingots,
+                            gold_blocks=add_gold_blocks, gold_ingots=add_gold_ingots,
+                            diamond_blocks=add_diamond_blocks, diamond_items=add_diamond_items,
+                            company_id=company_id)
             st.success("✅ Materials added to stash!")
             st.rerun()
         else:
@@ -1002,16 +1234,15 @@ elif page == "📦 Stash Manager":
 
     st.markdown("---")
 
-    # Clear stash button
-    if st.button("🗑️ Clear Stash", type="secondary", use_container_width=True):
-        if stash and (stash["iron_blocks"] or stash["iron_ingots"] or stash["gold_blocks"]
-                      or stash["gold_ingots"] or stash["diamond_blocks"] or stash["diamond_items"]
+    if st.button("🗑️ Clear Stash", type="secondary", use_container_width=True, disabled=read_only):
+        if stash and (stash.get("iron_blocks") or stash.get("iron_ingots") or stash.get("gold_blocks")
+                      or stash.get("gold_ingots") or stash.get("diamond_blocks") or stash.get("diamond_items")
                       or stash.get("raw_iron_blocks", 0) or stash.get("raw_gold_blocks", 0)):
             st.warning("Are you sure?")
             col_confirm1, col_confirm2 = st.columns(2)
             with col_confirm1:
                 if st.button("Yes, clear it", type="primary"):
-                    db.clear_stash()
+                    db.clear_stash(company_id=company_id)
                     st.success("✅ Stash cleared!")
                     st.rerun()
             with col_confirm2:
@@ -1024,38 +1255,31 @@ elif page == "📦 Stash Manager":
     st.subheader("📋 Import from Item List")
     st.markdown(
         "Paste a raw item dump (e.g. from the game's storage interface) below. "
-        "Only recognised items (Iron, Gold, Diamond blocks/ingots/raw variants) will be imported – "
-        "everything else is ignored. **This replaces the entire stash.**"
+        "Only recognised items will be imported. **This replaces the entire stash.**"
     )
-    import_text = st.text_area(
-        "Paste item list here",
-        height=200,
-        placeholder="Paste your item dump here...\nExample:\nBlock of Raw Iron:  713\nBlock of Iron:  176\nIron Ingot:  95\nBlock of Raw Gold:  86\nBlock of Gold:  67\nGold Ingot:  268\nBlock of Diamond:  183\nDiamond:  15",
-        key="import_text",
-    )
-    if st.button("📥 Import & Replace Stash", type="primary", use_container_width=True):
+    import_text = st.text_area("Paste item list here", height=200, key="import_text")
+    if st.button("📥 Import & Replace Stash", type="primary", use_container_width=True, disabled=read_only):
         if not import_text.strip():
             st.warning("⚠ Please paste an item list first.")
         else:
-            updated_stash, recognised, skipped = db.import_items_to_stash(import_text)
+            updated_stash, recognised, skipped = db.import_items_to_stash(import_text, company_id=company_id)
             skipped_count = len(skipped)
-            # Build a summary of what was detected
             detected_parts = []
             if updated_stash.get("raw_iron_blocks"):
                 detected_parts.append(f"{updated_stash['raw_iron_blocks']} raw iron blocks")
-            if updated_stash["iron_blocks"]:
+            if updated_stash.get("iron_blocks"):
                 detected_parts.append(f"{updated_stash['iron_blocks']} iron blocks")
-            if updated_stash["iron_ingots"]:
+            if updated_stash.get("iron_ingots"):
                 detected_parts.append(f"{updated_stash['iron_ingots']} iron ingots")
             if updated_stash.get("raw_gold_blocks"):
                 detected_parts.append(f"{updated_stash['raw_gold_blocks']} raw gold blocks")
-            if updated_stash["gold_blocks"]:
+            if updated_stash.get("gold_blocks"):
                 detected_parts.append(f"{updated_stash['gold_blocks']} gold blocks")
-            if updated_stash["gold_ingots"]:
+            if updated_stash.get("gold_ingots"):
                 detected_parts.append(f"{updated_stash['gold_ingots']} gold ingots")
-            if updated_stash["diamond_blocks"]:
+            if updated_stash.get("diamond_blocks"):
                 detected_parts.append(f"{updated_stash['diamond_blocks']} diamond blocks")
-            if updated_stash["diamond_items"]:
+            if updated_stash.get("diamond_items"):
                 detected_parts.append(f"{updated_stash['diamond_items']} diamonds")
             if detected_parts:
                 st.success(f"✅ Stash updated! Detected: {', '.join(detected_parts)}.")
@@ -1067,17 +1291,14 @@ elif page == "📦 Stash Manager":
                         st.text(line)
             st.rerun()
 
-
-# ===========================================================================
-# PAGE: Deal Templates
-# ===========================================================================
 elif page == "📋 Deal Templates":
     st.header("📋 Deal Templates")
-    st.markdown("Save and load common deal configurations.")
 
-    templates = db.load_templates()
+    if st.session_state.is_read_only:
+        st.info("🔒 Read-only mode — templates cannot be saved or modified.")
 
-    # Save new template
+    templates = db.load_templates(company_id=company_id)
+
     st.subheader("💾 Save Current Deal as Template")
     with st.form("save_template_form"):
         col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns(5)
@@ -1091,18 +1312,16 @@ elif page == "📋 Deal Templates":
             t_diamond = st.number_input("Diamonds (items)", min_value=0.0, step=1.0, value=0.0)
         with col_t5:
             t_offer = st.number_input("Offered price ($)", min_value=0.0, step=0.5, value=0.0)
-
-        save_template_clicked = st.form_submit_button("💾 Save Template", type="primary", use_container_width=True)
+        save_template_clicked = st.form_submit_button("💾 Save Template", type="primary", use_container_width=True, disabled=st.session_state.is_read_only)
 
     if save_template_clicked:
         if template_name.strip():
-            if db.save_template(template_name.strip(), t_iron, t_gold, t_diamond, t_offer):
+            if db.save_template(template_name.strip(), t_iron, t_gold, t_diamond, t_offer, company_id=company_id):
                 st.success(f"✅ Template '{template_name}' saved!")
                 st.rerun()
         else:
             st.warning("⚠ Please enter a template name.")
 
-    # Load and use template
     if templates:
         st.subheader("📋 Saved Templates")
         for tmpl in templates:
@@ -1118,49 +1337,31 @@ elif page == "📋 Deal Templates":
             with col_t5:
                 st.write(f"${tmpl['offered_price']:.2f}")
             with col_t6:
-                load_key = f"load_tmpl_{tmpl['name']}"
-                if st.button("📥 Load", key=load_key, use_container_width=True):
-                    # Save template data to session state for deal calculator
+                if st.button("📥 Load", key=f"load_tmpl_{tmpl['name']}_{tmpl['company_id']}", use_container_width=True):
                     st.session_state.template_load = tmpl
                     st.success(f"✅ Template '{tmpl['name']}' loaded! Go to Deal Calculator.")
                     st.rerun()
+                if not st.session_state.is_read_only:
+                    if st.button("🗑️", key=f"del_tmpl_{tmpl['name']}_{tmpl['company_id']}"):
+                        db.delete_template(tmpl['name'], company_id=company_id)
+                        st.rerun()
 
-                del_key = f"del_tmpl_{tmpl['name']}"
-                if st.button("🗑️", key=del_key):
-                    db.delete_template(tmpl['name'])
-                    st.rerun()
-
-        # Show loaded template data
-        if "template_load" in st.session_state and st.session_state.template_load:
+        if st.session_state.template_load:
             tmpl = st.session_state.template_load
-            st.info(
-                f"📥 **Loaded template:** {tmpl['name']} – "
-                f"Iron: {tmpl['iron_ingots']:.0f}, "
-                f"Gold: {tmpl['gold_ingots']:.0f}, "
-                f"Diamonds: {tmpl['diamond_items']:.0f}, "
-                f"Offer: ${tmpl['offered_price']:.2f}"
-            )
+            st.info(f"📥 **Loaded template:** {tmpl['name']} – Iron: {tmpl['iron_ingots']:.0f}, Gold: {tmpl['gold_ingots']:.0f}, Diamonds: {tmpl['diamond_items']:.0f}, Offer: ${tmpl['offered_price']:.2f}")
             if st.button("🧹 Clear loaded template"):
                 st.session_state.template_load = None
                 st.rerun()
     else:
         st.info("No templates saved yet. Create one above!")
 
-
-# ===========================================================================
-# PAGE: Item Lookup
-# ===========================================================================
 elif page == "🔍 Item Lookup":
     st.header("🔍 Item Lookup")
-    st.markdown("Look up any item from the DemocracyCraft economy API and run a quick deal analysis.")
+    st.markdown("Look up any item from the DemocracyCraft economy API and run a deal analysis.")
 
     col_search, col_btn = st.columns([4, 1])
     with col_search:
-        item_name = st.text_input(
-            "Item name",
-            placeholder="e.g. Saddle, Netherite Ingot, Enchanted Golden Apple",
-            key="item_lookup_name",
-        )
+        item_name = st.text_input("Item name", placeholder="e.g. Saddle, Netherite Ingot", key="item_lookup_name")
     with col_btn:
         st.markdown("##### &nbsp;")
         lookup_clicked = st.button("🔍 Lookup", type="primary", use_container_width=True)
@@ -1168,42 +1369,29 @@ elif page == "🔍 Item Lookup":
     if lookup_clicked and item_name.strip():
         with st.spinner(f"⏳ Looking up '{item_name}' …"):
             cache = MarketDeal.load_cache()
-            info = MarketDeal.lookup_item(item_name.strip(), cache)
+            info_val = MarketDeal.lookup_item(item_name.strip(), cache)
             MarketDeal.save_cache(cache)
-            # Store lookup data under a non-widget key (leading underscore)
-            st.session_state._lookup_info = info
+            st.session_state._lookup_info = info_val
 
-        if info.get("error"):
-            st.error(f"❌ {info['error']}")
-        elif info.get("cached"):
+        if info_val.get("error"):
+            st.error(f"❌ {info_val['error']}")
+        elif info_val.get("cached"):
             st.info("📦 Results from cache — cached price shown below.")
-            st.metric("Avg. Unit Price", f"${info['avg_unit_price']:.2f}")
+            st.metric("Avg. Unit Price", f"${info_val['avg_unit_price']:.2f}")
         else:
             st.success("✅ Item found!")
-
             col_i1, col_i2, col_i3, col_i4 = st.columns(4)
-            avg_price = info.get("avg_unit_price")
-            col_i1.metric(
-                "💰 Avg. Unit Price",
-                f"${avg_price:.2f}" if avg_price else "N/A",
-            )
-            col_i2.metric("🏪 Active Shops", info.get("shop_count", 0))
-            col_i3.metric(
-                "📉 Min Price",
-                f"${info['min_price']:.2f}" if info.get("min_price") else "N/A",
-            )
-            col_i4.metric(
-                "📈 Max Price",
-                f"${info['max_price']:.2f}" if info.get("max_price") else "N/A",
-            )
+            avg_price = info_val.get("avg_unit_price")
+            col_i1.metric("💰 Avg. Unit Price", f"${avg_price:.2f}" if avg_price else "N/A")
+            col_i2.metric("🏪 Active Shops", info_val.get("shop_count", 0))
+            col_i3.metric("📉 Min Price", f"${info_val['min_price']:.2f}" if info_val.get("min_price") else "N/A")
+            col_i4.metric("📈 Max Price", f"${info_val['max_price']:.2f}" if info_val.get("max_price") else "N/A")
             col_trades = st.columns([1])
-            col_trades[0].metric("📊 Total Trades (30d)", info.get("total_trades", 0))
-
-            # Show cheapest shops table
-            if info.get("cheapest_shops"):
+            col_trades[0].metric("📊 Total Trades (30d)", info_val.get("total_trades", 0))
+            if info_val.get("cheapest_shops"):
                 with st.expander("🏪 Cheapest Shops", expanded=False):
                     shop_rows = []
-                    for s in info["cheapest_shops"]:
+                    for s in info_val["cheapest_shops"]:
                         shop_rows.append({
                             "Shop": s.get("shopName", "?"),
                             "Buy Price": f"${float(s['buyPrice']):.2f}" if s.get("buyPrice") else "?",
@@ -1211,17 +1399,14 @@ elif page == "🔍 Item Lookup":
                             "Stock": s.get("stock", "?"),
                         })
                     st.table(shop_rows)
-
-            # ── Deal Analysis ──
             st.markdown("---")
             st.subheader("💼 Deal Analysis")
 
-    # Deal analysis inputs (shown if we have lookup data in session state)
-    info = st.session_state.get("_lookup_info")
+    info_val = st.session_state.get("_lookup_info")
     item_name = st.session_state.get("item_lookup_name", "")
 
-    if info and info.get("avg_unit_price"):
-        avg_price = info["avg_unit_price"]
+    if info_val and info_val.get("avg_unit_price"):
+        avg_price = info_val["avg_unit_price"]
 
         if "item_lookup_qty" not in st.session_state:
             st.session_state.item_lookup_qty = 1
@@ -1230,46 +1415,31 @@ elif page == "🔍 Item Lookup":
 
         col_q, col_o = st.columns(2)
         with col_q:
-            quantity = st.number_input(
-                f"Quantity ({item_name})",
-                min_value=1, step=1, value=st.session_state.item_lookup_qty,
-                key="item_lookup_qty_input",
-            )
+            quantity = st.number_input(f"Quantity ({item_name})", min_value=1, step=1, key="item_lookup_qty_input")
         with col_o:
-            offered_price = st.number_input(
-                "💰 Offered Price ($)",
-                min_value=0.0, step=0.5, value=st.session_state.item_lookup_offer,
-                key="item_lookup_offer_input",
-            )
+            offered_price_input = st.number_input("💰 Offered Price ($)", min_value=0.0, step=0.5, key="item_lookup_offer_input")
 
         if st.button("📊 Calculate", type="primary", use_container_width=True, key="item_lookup_calc"):
             total_value = quantity * avg_price
-            profit = offered_price - total_value
+            profit = offered_price_input - total_value
             min_acceptable = total_value * MarketDeal.MIN_ACCEPTABLE_PERCENT
 
-            if offered_price >= total_value:
+            if offered_price_input >= total_value:
                 status = "ACCEPTED (PROFIT)"
                 status_msg = f"✅ +${profit:.2f} profit over market value (${total_value:.2f})."
-            elif offered_price >= min_acceptable:
+            elif offered_price_input >= min_acceptable:
                 status = "ACCEPTED (BULK)"
                 status_msg = f"🟡 OK! Within bulk discount (${abs(profit):.2f} discount from ${total_value:.2f})."
             else:
                 status = "REJECTED"
-                status_msg = f"❌ Too cheap! Need ${min_acceptable - offered_price:.2f} more to reach your limit."
+                status_msg = f"❌ Too cheap! Need ${min_acceptable - offered_price_input:.2f} more."
 
             st.session_state.item_lookup_result = {
-                "item_name": item_name,
-                "quantity": quantity,
-                "unit_price": avg_price,
-                "total_value": total_value,
-                "offered_price": offered_price,
-                "status": status,
-                "status_msg": status_msg,
-                "profit": profit,
-                "min_acceptable": min_acceptable,
+                "item_name": item_name, "quantity": quantity, "unit_price": avg_price,
+                "total_value": total_value, "offered_price": offered_price_input,
+                "status": status, "status_msg": status_msg, "profit": profit, "min_acceptable": min_acceptable,
             }
 
-        # Display result
         if "item_lookup_result" in st.session_state and st.session_state.item_lookup_result:
             r = st.session_state.item_lookup_result
             st.markdown("---")
@@ -1277,119 +1447,84 @@ elif page == "🔍 Item Lookup":
             col_r1.metric("Market Value", f"${r['total_value']:.2f}")
             col_r2.metric("Your Offer", f"${r['offered_price']:.2f}")
             col_r3.metric("Profit / Loss", f"${r['profit']:.2f}", delta=f"${r['profit']:.2f}")
-
             st.markdown(f"### {r['status']}")
             st.markdown(f"**{r['status_msg']}**")
 
-            # ── Save Deal UI (like Deal Calculator) ──
-            st.markdown("---")
-            st.subheader("💾 Save Deal")
+            if not st.session_state.is_read_only:
+                st.markdown("---")
+                st.subheader("💾 Save Deal")
 
-            col_log1, col_log2 = st.columns([1, 1])
-            with col_log1:
-                auto_status = r["status"]
-                status_options = [
-                    f"Auto: {auto_status}",
-                    "ACCEPTED (PROFIT)",
-                    "ACCEPTED (BULK)",
-                    "REJECTED",
-                    "CUSTOM",
-                ]
-                selected_status = st.selectbox(
-                    "Deal Status",
-                    status_options,
-                    key="item_lookup_status_select",
-                )
-                if selected_status == f"Auto: {auto_status}":
-                    final_status = auto_status
-                elif selected_status == "CUSTOM":
-                    final_status = st.text_input(
-                        "Enter custom status:",
-                        key="item_lookup_custom_status",
-                    )
-                    if not final_status.strip():
+                col_log1, col_log2 = st.columns([1, 1])
+                with col_log1:
+                    auto_status = r["status"]
+                    status_options = [f"Auto: {auto_status}", "ACCEPTED (PROFIT)", "ACCEPTED (BULK)", "REJECTED", "CUSTOM"]
+                    selected_status = st.selectbox("Deal Status", status_options, key="item_lookup_status_select")
+                    if selected_status == f"Auto: {auto_status}":
                         final_status = auto_status
-                else:
-                    final_status = selected_status
+                    elif selected_status == "CUSTOM":
+                        final_status = st.text_input("Enter custom status:", key="item_lookup_custom_status")
+                        if not final_status.strip():
+                            final_status = auto_status
+                    else:
+                        final_status = selected_status
 
-            with col_log2:
-                manual_offer = st.number_input(
-                    "Offered Price ($) (override if needed)",
-                    min_value=0.0, step=0.5,
-                    value=r["offered_price"],
-                    key="item_lookup_manual_offer",
-                )
+                with col_log2:
+                    manual_offer = st.number_input("Offered Price ($) (override)", min_value=0.0, step=0.5, value=r["offered_price"], key="item_lookup_manual_offer")
 
-            if st.button("💾 Log this deal to database", key="item_lookup_log", use_container_width=True):
-                # Recalculate profit with manual offer
-                calc_profit = manual_offer - r["total_value"]
-                db.log_item_deal(
-                    item_name=r["item_name"],
-                    quantity=r["quantity"],
-                    unit_price=r["unit_price"],
-                    total_value=r["total_value"],
-                    offered_price=manual_offer,
-                    status=final_status,
-                    profit=calc_profit,
-                )
-                st.success(f"✅ Item lookup deal logged to database as '{final_status}'!")
+                if st.button("💾 Log this deal to database", key="item_lookup_log", use_container_width=True):
+                    calc_profit = manual_offer - r["total_value"]
+                    db.log_item_deal(
+                        item_name=r["item_name"], quantity=r["quantity"], unit_price=r["unit_price"],
+                        total_value=r["total_value"], offered_price=manual_offer,
+                        status=final_status, profit=calc_profit, company_id=company_id,
+                    )
+                    st.success(f"✅ Item lookup deal logged to database as '{final_status}'!")
+            else:
+                st.info("🔒 Read-only mode — deals cannot be saved.")
 
-    # ── Lookup Deal History ──
+    # Lookup Deal History
     st.markdown("---")
     st.subheader("📋 Lookup Deal History")
-    lookup_deals = db.get_item_lookup_deals(limit=50)
+    lookup_deals = db.get_item_lookup_deals(limit=50, company_id=company_id)
     if lookup_deals:
         df_lookup = pd.DataFrame(lookup_deals)
         df_lookup["Date/Time"] = pd.to_datetime(df_lookup["timestamp"])
         df_lookup = df_lookup.sort_values("Date/Time", ascending=False)
         df_display = df_lookup.rename(columns={
-            "item_name": "Item",
-            "quantity": "Qty",
-            "unit_price": "Unit Price",
-            "total_value": "Market Value",
-            "offered_price": "Offered",
-            "status": "Status",
-            "profit": "Profit",
+            "item_name": "Item", "quantity": "Qty", "unit_price": "Unit Price",
+            "total_value": "Market Value", "offered_price": "Offered", "status": "Status", "profit": "Profit",
         })
-        # Drop raw columns not needed for display
-        df_display = df_display.drop(columns=["id", "timestamp"], errors="ignore")
-        st.dataframe(df_display[["Date/Time", "Item", "Qty", "Unit Price", "Market Value", "Offered", "Status", "Profit"]],
-                     use_container_width=True, hide_index=True)
+        df_display = df_display.drop(columns=["id", "company_id", "timestamp"], errors="ignore")
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-        # Stats
-        lookup_stats = db.get_item_lookup_stats()
+        lookup_stats = db.get_item_lookup_stats(company_id=company_id)
         col_s1, col_s2, col_s3, col_s4 = st.columns(4)
         col_s1.metric("Total Lookup Deals", lookup_stats["total_deals"])
         col_s2.metric("Accepted", lookup_stats["accepted"])
         col_s3.metric("Total Profit", f"${lookup_stats['total_profit']:,.2f}")
         col_s4.metric("Avg Profit/Deal", f"${lookup_stats['avg_profit']:,.2f}")
 
-        # Delete button
-        deal_ids = [d["id"] for d in lookup_deals]
-        if deal_ids:
-            del_id = st.selectbox("Delete a lookup deal by ID:", deal_ids, key="item_lookup_del")
-            if st.button("🗑️ Delete", key="item_lookup_del_btn"):
-                if db.delete_item_lookup_deal(del_id):
-                    st.success(f"✅ Deal #{del_id} deleted!")
-                    st.rerun()
+        if not st.session_state.is_read_only:
+            deal_ids = [d["id"] for d in lookup_deals]
+            if deal_ids:
+                del_id = st.selectbox("Delete a lookup deal by ID:", deal_ids, key="item_lookup_del")
+                if st.button("🗑️ Delete", key="item_lookup_del_btn"):
+                    if db.delete_item_lookup_deal(del_id, company_id=company_id):
+                        st.success(f"✅ Deal #{del_id} deleted!")
+                        st.rerun()
     else:
-        st.info("No item lookup deals saved yet. Look up an item and save a deal above!")
+        st.info("No item lookup deals saved yet.")
 
-
-# ===========================================================================
-# PAGE: Price History
-# ===========================================================================
 elif page == "📈 Price History":
     st.header("📈 Price History")
     st.markdown("Track prices over time. Every time prices are fetched, a snapshot is saved.")
 
-    # Save current prices as snapshot
     if st.button("📸 Save current prices as snapshot", type="primary", use_container_width=True):
-        db.save_price_snapshot(price_iron, price_gold, price_diamond)
+        db.save_price_snapshot(price_iron, price_gold, price_diamond, company_id=company_id)
         st.success("✅ Price snapshot saved!")
 
     days = st.slider("Show history for last N days:", min_value=1, max_value=90, value=30)
-    history = db.get_price_history(days=days)
+    history = db.get_price_history(days=days, company_id=company_id)
 
     if history:
         df = pd.DataFrame(history)
@@ -1397,24 +1532,14 @@ elif page == "📈 Price History":
 
         st.subheader("📊 Price Over Time")
         chart_df = df.set_index("timestamp")
-        chart_df = chart_df.rename(columns={
-            "iron_price": "Iron Ingot ($)",
-            "gold_price": "Gold Ingot ($)",
-            "diamond_price": "Diamond ($)",
-        })
+        chart_df = chart_df.rename(columns={"iron_price": "Iron Ingot ($)", "gold_price": "Gold Ingot ($)", "diamond_price": "Diamond ($)"})
         st.line_chart(chart_df[["Iron Ingot ($)", "Gold Ingot ($)", "Diamond ($)"]])
 
         st.subheader("📋 All Price Snapshots")
-        df_display = df.rename(columns={
-            "timestamp": "Date/Time",
-            "iron_price": "Iron ($)",
-            "gold_price": "Gold ($)",
-            "diamond_price": "Diamond ($)",
-        })
+        df_display = df.rename(columns={"timestamp": "Date/Time", "iron_price": "Iron ($)", "gold_price": "Gold ($)", "diamond_price": "Diamond ($)"})
         df_display = df_display.sort_values("Date/Time", ascending=False)
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-        # Stats
         if len(history) > 1:
             st.subheader("📈 Price Changes")
             first = history[0]
@@ -1428,3 +1553,77 @@ elif page == "📈 Price History":
             col_p3.metric("Diamond Change", f"${last['diamond_price']:.2f}", f"{diamond_change:+.2f}")
     else:
         st.info("No price history yet. Click 'Save current prices as snapshot' to start tracking!")
+
+elif page == "👤 My Profile":
+    st.header("👤 My Profile")
+
+    company = db.get_company_by_id(company_id)
+
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        st.subheader("🔗 Discord Account")
+        avatar = st.session_state.discord_avatar_url
+        if avatar:
+            st.markdown(
+                f"<img src='{avatar}' width='64' height='64' style='border-radius:50%'>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(f"**Username:** {st.session_state.discord_username}")
+        st.markdown(f"**Role:** {'🛡️ Admin' if st.session_state.is_admin else '👤 User'}")
+
+        if company:
+            st.markdown("---")
+            st.subheader("🏢 Company")
+            current_name = company.get("company_name", "") or ""
+            new_name = st.text_input("Company name", value=current_name, key="profile_company_name")
+            if st.button("💾 Save Name", type="primary", use_container_width=True):
+                if new_name.strip() and new_name.strip() != current_name:
+                    if db.update_company_name(company_id, new_name.strip()):
+                        st.success("✅ Company name updated!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to update company name.")
+
+    with col_right:
+        if company:
+            st.subheader("🔑 API Key")
+            api_key = company.get("api_key", "")
+            show_key = st.checkbox("Show API key", value=False, key="profile_show_key")
+            if show_key:
+                st.code(api_key, language="text")
+                st.caption("Keep this key secret — it grants access to your data via the REST API.")
+            else:
+                st.code("dc_••••••••••••••", language="text")
+
+            if not st.session_state.is_read_only:
+                if st.button("🔄 Regenerate API Key", type="secondary", use_container_width=True):
+                    new_key = db.regenerate_api_key(company_id)
+                    if new_key:
+                        st.success(f"✅ New API key generated! Copy it now: `{new_key}`")
+                        st.rerun()
+                    else:
+                        st.error("Failed to regenerate API key.")
+
+            st.markdown("---")
+            st.subheader("📅 Access")
+            expires_at = company.get("access_expires_at")
+            is_trial = company.get("trial_used", 0) == 1
+            is_active = company.get("is_active", 1)
+
+            if not is_active:
+                st.error("❌ **Deactivated** — contact Fishy Business.")
+            elif expires_at:
+                try:
+                    expiry = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
+                    remaining = (expiry - datetime.now(timezone.utc)).days
+                    if remaining < 0:
+                        st.warning(f"⚠️ **Expired** — access ended on {expires_at}")
+                    else:
+                        st.success(f"✅ **Active** — expires in **{remaining} days** ({expires_at})")
+                        if is_trial:
+                            st.info("🎁 Trial account — contact Fishy Business to upgrade.")
+                except (ValueError, TypeError):
+                    st.info(f"Expires: {expires_at}")
+            else:
+                st.success("✅ **Active** — no expiry date (permanent access)")

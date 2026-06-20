@@ -1,15 +1,19 @@
+# src/core/market_deal.py
+"""
+Core business logic for the DemocracyCraft Trading Toolbox.
+Price fetching, unit conversions, deal analysis, and stash utilities.
+"""
+
 import os
 import sys
 import time
-import requests
 import logging
-from typing import Optional
+from urllib.parse import quote
+
+import requests
 
 from src.core.settings import get_settings
 from src.core import database as db
-from dotenv import load_dotenv
-
-load_dotenv()
 
 _settings = get_settings()
 
@@ -22,6 +26,8 @@ API_TIMEOUT = _settings.API_TIMEOUT
 API_RETRIES = _settings.API_RETRIES
 API_RETRY_DELAY = _settings.API_RETRY_DELAY
 PRICE_DAYS_LOOKBACK = _settings.PRICE_DAYS_LOOKBACK
+ITEMS_PER_STACK = _settings.ITEMS_PER_STACK
+ITEMS_PER_SHULKER = _settings.ITEMS_PER_SHULKER
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,203 @@ def get_api_key() -> str:
         )
         sys.exit(1)
     return api_key
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Deal Analysis — shared by both CLI and Web UI
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def analyze_deal(
+    iron_ingots: float,
+    gold_ingots: float,
+    diamond_items: float,
+    price_iron: float,
+    price_gold: float,
+    price_diamond: float,
+    offered_price: float | None = None,
+) -> dict:
+    """
+    Compute market value, status, profit, and shipping info for a deal.
+
+    Returns a dict with keys:
+      market_value, min_needed_price, offered_price, percent_of_market,
+      profit_loss, status, status_emoji, status_msg, stacks, shulkers,
+      counter_offer (optional)
+    """
+    total_market_value = (
+        (iron_ingots * price_iron)
+        + (gold_ingots * price_gold)
+        + (diamond_items * price_diamond)
+    )
+    min_needed_price = total_market_value * MIN_ACCEPTABLE_PERCENT
+    offered_price = offered_price or 0.0
+
+    percent_of_market = (
+        (offered_price / total_market_value) * 100 if total_market_value > 0 else 0
+    )
+    profit_loss = offered_price - total_market_value
+
+    stacks = (iron_ingots + gold_ingots + diamond_items) / float(ITEMS_PER_STACK)
+    shulkers = (iron_ingots + gold_ingots + diamond_items) / float(ITEMS_PER_SHULKER)
+
+    # Determine deal status
+    if offered_price >= total_market_value:
+        status = "ACCEPTED (PROFIT)"
+        status_emoji = "🟩"
+        status_msg = f"SUPER DEAL! +{profit_loss:.2f}$ profit over market price."
+    elif offered_price >= min_needed_price:
+        status = "ACCEPTED (BULK)"
+        status_emoji = "🟨"
+        status_msg = (
+            f"OK! Within bulk discount range "
+            f"(discount: {abs(profit_loss):.2f}$)"
+        )
+    else:
+        status = "REJECTED"
+        status_emoji = "🟥"
+        status_msg = (
+            f"TOO CHEAP! You are missing "
+            f"{min_needed_price - offered_price:.2f}$ to reach your limit."
+        )
+
+    result: dict = {
+        "market_value": total_market_value,
+        "min_needed_price": min_needed_price,
+        "offered_price": offered_price,
+        "percent_of_market": percent_of_market,
+        "profit_loss": profit_loss,
+        "status": status,
+        "status_emoji": status_emoji,
+        "status_msg": status_msg,
+        "stacks": stacks,
+        "shulkers": shulkers,
+        "iron_ingots": iron_ingots,
+        "gold_ingots": gold_ingots,
+        "diamond_items": diamond_items,
+        "price_iron": price_iron,
+        "price_gold": price_gold,
+        "price_diamond": price_diamond,
+    }
+
+    # Smart counter-offer logic on rejection
+    if status == "REJECTED":
+        diamond_value = diamond_items * price_diamond
+        remaining_budget = offered_price - diamond_value
+        total_metals = iron_ingots + gold_ingots
+
+        if total_metals > 0 and remaining_budget > 0:
+            ratio = iron_ingots / total_metals
+            fair_metals = remaining_budget / ((ratio * price_iron) + ((1 - ratio) * price_gold))
+            result["counter_offer"] = {
+                "iron": fair_metals * ratio if iron_ingots > 0 else 0,
+                "gold": fair_metals * (1 - ratio) if gold_ingots > 0 else 0,
+                "diamond": diamond_items if diamond_items > 0 else 0,
+            }
+        elif remaining_budget <= 0 and total_market_value > 0:
+            result["counter_offer"] = None
+
+    return result
+
+
+def stash_ingot_equivalents(stash: dict) -> tuple[int, int, int]:
+    """
+    Calculate total ingot/items from a stash dict.
+    Returns (total_iron_ingots, total_gold_ingots, total_diamond_items).
+    """
+    total_iron = (
+        (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0))
+        * INGOTS_PER_BLOCK
+        + stash.get("iron_ingots", 0)
+    )
+    total_gold = (
+        (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0))
+        * INGOTS_PER_BLOCK
+        + stash.get("gold_ingots", 0)
+    )
+    total_diamond = (
+        stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK
+        + stash.get("diamond_items", 0)
+    )
+    return total_iron, total_gold, total_diamond
+
+
+def format_subtract_result(result: dict) -> str:
+    """Format a stash subtraction result dict into a human-readable string."""
+    parts = []
+    if result.get("iron_blocks") or result.get("iron_ingots"):
+        parts.append(f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots")
+    if result.get("gold_blocks") or result.get("gold_ingots"):
+        parts.append(f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots")
+    if result.get("diamond_blocks") or result.get("diamond_items"):
+        parts.append(f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items")
+    return ", ".join(parts)
+
+
+def handle_stash_subtraction(
+    iron_ingots: int,
+    gold_ingots: int,
+    diamond_items: int,
+    company_id: int = 1,
+    auto_confirm: bool = False,
+) -> dict | None:
+    """
+    Handle stash subtraction after a deal.
+
+    If auto_confirm is True, subtracts silently.
+    Otherwise, returns a dict with subtraction info without subtracting
+    (caller must handle prompt).
+
+    Returns a dict with subtraction result if subtraction happened,
+    or None if no subtraction was needed (total == 0).
+    """
+    total = iron_ingots + gold_ingots + diamond_items
+    if total == 0:
+        return None
+
+    auto_sub = db.get_auto_subtract(company_id=company_id)
+
+    if auto_sub or auto_confirm:
+        result = db.subtract_from_stash(
+            iron_ingots, gold_ingots, diamond_items, company_id=company_id
+        )
+        return result
+
+    return {"pending": True}
+
+
+def fetch_live_prices(cache: dict | None = None) -> tuple[float, float, float, dict]:
+    """
+    Fetch current prices for Iron Ingot, Gold Ingot, and Diamond.
+    Returns (price_iron, price_gold, price_diamond, cache).
+    """
+    if cache is None:
+        cache = MarketDeal.load_cache()
+    p_iron = MarketDeal.get_price("Iron Ingot", cache)
+    p_gold = MarketDeal.get_price("Gold Ingot", cache)
+    p_diamond = MarketDeal.get_price("Diamond", cache)
+    MarketDeal.save_cache(cache)
+    return p_iron, p_gold, p_diamond, cache
+
+
+def stash_market_value(stash: dict, prices: tuple[float, float, float]) -> float:
+    """
+    Calculate the total market value of a stash given (price_iron, price_gold, price_diamond).
+    """
+    total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
+    p_iron, p_gold, p_diamond = prices
+    return total_iron * p_iron + total_gold * p_gold + total_diamond * p_diamond
+
+
+def total_stash_shipping(stash: dict) -> tuple[float, float]:
+    """
+    Calculate shipping volume (stacks, shulkers) for a stash.
+    """
+    total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
+    total = total_iron + total_gold + total_diamond
+    stacks = total / float(ITEMS_PER_STACK)
+    shulkers = total / float(ITEMS_PER_SHULKER)
+    return stacks, shulkers
 
 
 class MarketDeal:
@@ -73,7 +276,7 @@ class MarketDeal:
                 return entry["price"]
 
         logger.info("Fetching live price for '%s' …", item_name)
-        encoded_name = item_name.replace(" ", "%20").strip()
+        encoded_name = quote(item_name.strip(), safe="")
 
         api_key = get_api_key()
         url = (
@@ -85,7 +288,7 @@ class MarketDeal:
             "Accept": "application/json",
         }
 
-        fetched_price: Optional[float] = None
+        fetched_price: float | None = None
 
         # Retry loop
         for attempt in range(1, API_RETRIES + 1):
@@ -180,10 +383,11 @@ class MarketDeal:
         iron_price: float = 0.0,
         gold_price: float = 0.0,
         diamond_price: float = 0.0,
+        company_id: int = 1,
     ) -> None:
         """Log a deal to the SQLite database."""
         db.log_deal(iron, gold, diamonds, market_value, offered_val, status,
-                    iron_price, gold_price, diamond_price)
+                    iron_price, gold_price, diamond_price, company_id=company_id)
 
     # ------------------------------------------------------------------
     # Item lookup (any item via API)
@@ -210,7 +414,7 @@ class MarketDeal:
                 }
 
         logger.info("Looking up item '%s' …", item_name)
-        encoded_name = item_name.replace(" ", "%20").strip()
+        encoded_name = quote(item_name.strip(), safe="")
 
         api_key = get_api_key()
         url = (
@@ -222,7 +426,7 @@ class MarketDeal:
             "Accept": "application/json",
         }
 
-        result: Optional[dict] = None
+        result: dict | None = None
 
         for attempt in range(1, API_RETRIES + 1):
             try:

@@ -1,6 +1,6 @@
 # =============================================================================
 # docker-compose.yml – DC Trade Toolbox
-# 
+#
 # EINFACH STARTEN (SQLite – kein Setup nötig):
 #   docker compose up -d
 #
@@ -12,17 +12,34 @@ services:
   # ---------- Main application (Streamlit + FastAPI) ----------
   app:
     image: dc-trade:latest
-    build: .
+    build:
+      context: .
+      # BuildKit is auto-enabled in Docker v24+.
+      # For older Docker, set DOCKER_BUILDKIT=1 in your shell:
+      #   DOCKER_BUILDKIT=1 docker compose build
     container_name: dc-trade
     restart: unless-stopped
     ports:
       - "${STREAMLIT_PORT:-8501}:8501"   # Streamlit web UI
       - "${API_PORT:-8000}:8000"         # FastAPI REST API
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       - DC_API_KEY=${DC_API_KEY:-}
       - COMPANY_NAME=${COMPANY_NAME:-Fishy Business}
       - STREAMLIT_PORT=${STREAMLIT_PORT:-8501}
       - API_PORT=${API_PORT:-8000}
+      # Discord OAuth — passed from host .env file
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - DISCORD_REDIRECT_URI=${DISCORD_REDIRECT_URI:-http://localhost:8501/}
+      - ADMIN_DISCORD_IDS=${ADMIN_DISCORD_IDS:-}
+      - TRIAL_DAYS=${TRIAL_DAYS:-3}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      # PostgreSQL connection
+      - DATABASE_URL=${DATABASE_URL:-}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
     volumes:
       - dc_trade_data:/app/data
 
@@ -35,7 +52,7 @@ services:
       - db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dctrade}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-dctrade}
     ports:
       - "5432:5432"

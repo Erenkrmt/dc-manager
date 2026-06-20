@@ -9,9 +9,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from functools import lru_cache
+from dotenv import load_dotenv
 
 # Determine the project root (two levels up from this file: src/core/ -> src/ -> /)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Load .env file from the project root (explicit path to avoid CWD issues)
+load_dotenv(_PROJECT_ROOT / ".env")
 
 
 class Settings:
@@ -31,10 +35,6 @@ class Settings:
 
     # ── API ──────────────────────────────────────────────────────────────
     DC_API_KEY: str = os.getenv("DC_API_KEY", "")
-    API_BASE_URL: str = os.getenv(
-        "API_BASE_URL",
-        "https://api.democracycraft.net/economy/api/v1/chestshop/items",
-    )
     API_TIMEOUT: int = int(os.getenv("API_TIMEOUT", "10"))
     API_RETRIES: int = int(os.getenv("API_RETRIES", "3"))
     API_RETRY_DELAY: int = int(os.getenv("API_RETRY_DELAY", "2"))
@@ -51,6 +51,22 @@ class Settings:
     ITEMS_PER_SHULKER: int = 1728  # 27 * 64
     INGOTS_PER_BLOCK: int = 9
     NUGGETS_PER_INGOT: int = 9
+
+    # ── Multi-company / Auth ────────────────────────────────────────────
+    # Discord OAuth 2.0 — set these in .env for production
+    DISCORD_CLIENT_ID: str = os.getenv("DISCORD_CLIENT_ID", "")
+    DISCORD_CLIENT_SECRET: str = os.getenv("DISCORD_CLIENT_SECRET", "")
+    DISCORD_REDIRECT_URI: str = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8501/")
+    # Comma-separated list of Discord user IDs that have admin access
+    ADMIN_DISCORD_IDS: list[str] = [
+        x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip()
+    ]
+    # Trial duration in days (immediate on first Discord login)
+    TRIAL_DAYS: int = int(os.getenv("TRIAL_DAYS", "3"))
+    # Session secret for signing cookies (auto-generated if empty)
+    SESSION_SECRET: str = os.getenv("SESSION_SECRET", "")
+    # API key prefix format
+    API_KEY_PREFIX: str = "dc_"
 
     # ── Server ───────────────────────────────────────────────────────────
     STREAMLIT_PORT: int = int(os.getenv("STREAMLIT_PORT", "8501"))
