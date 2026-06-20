@@ -55,15 +55,11 @@ Before any task, read `REPO_OVERVIEW.md` for full context on the project structu
 - Tests exist in `tests/test_database.py` (stash operations) and `tests/test_api.py` (FastAPI endpoints)
 
 ## Docker
-- Multi-stage Dockerfile (`Dockerfile` for local, `Dockerfile.cloudrun` for Cloud Run)
 - `docker compose up -d` for SQLite, `docker compose --profile db up -d` for PostgreSQL
 - Health check on port 8000/health
 
 ## Deployment
-- Cloud Run via `Dockerfile.cloudrun` + `scripts/run_cloudrun.py`
 - For production: set `DATABASE_URL` to PostgreSQL, run `alembic upgrade head`
-- Cloud Build pipeline: `cloudbuild.yaml`
-- See `DEPLOY_CLOUD_RUN.md` for detailed instructions
 
 ## Update this file
 If you discover new important conventions, gotchas, or structural decisions while working, add them to this file so future sessions benefit.

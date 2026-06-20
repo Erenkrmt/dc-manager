@@ -3,7 +3,7 @@
 # Common tasks for development and deployment.
 # =============================================================================
 
-.PHONY: help install dev streamlit api docker-build docker-up docker-down test clean env env-encrypt
+.PHONY: help install dev streamlit api docker-build docker-up docker-down test clean env env-encrypt install-hooks
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -36,12 +36,14 @@ docker-down: ## Stop all services (Docker)
 docker-logs: ## Show logs
 	docker compose logs -f
 
-env: ## Decrypt .env.encrypted → .env (requires age key in ~/.config/sops/age/keys.txt)
-	@bash scripts/setup_env.sh
+env: ## Decrypt .env.encrypted → .env (OS-agnostic, requires sops + age key)
+	python scripts/decrypt_env.py
 
-env-encrypt: ## Encrypt .env → .env.encrypted (requires age key in ~/.config/sops/age/keys.txt)
-	SOPS_AGE_KEY_FILE=$$HOME/.config/sops/age/keys.txt sops --encrypt --input-type dotenv --output-type dotenv .env > .env.encrypted
-	@echo "✅ Encrypted .env → .env.encrypted"
+env-encrypt: ## Encrypt .env → .env.encrypted (OS-agnostic, requires sops + age key)
+	python scripts/encrypt_env.py
+
+install-hooks: ## Install git pre-commit hook (auto-encrypt .env on commit)
+	python scripts/install_hooks.py
 
 test: ## Run tests
 	python -m pytest tests/ -v

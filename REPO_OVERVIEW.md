@@ -28,7 +28,6 @@ A **bulk trading calculator** for the [DemocracyCraft](https://democracycraft.ne
 | ORM / Migrations | SQLAlchemy models + **Alembic** |
 | Config | Pydantic-style `Settings` class via env vars + `.env` |
 | Container | Docker + docker-compose |
-| CI/CD | Cloud Build (`cloudbuild.yaml`), Cloud Run (`Dockerfile.cloudrun`) |
 
 ---
 
@@ -39,18 +38,14 @@ dc-manager/
 ├── main.py                          # CLI entry point (delegates to src/main.py)
 ├── pyproject.toml                   # Project metadata, dependencies, CLI scripts
 ├── Dockerfile                       # Multi-stage Docker build
-├── Dockerfile.cloudrun             # Cloud Run-specific build
 ├── docker-compose.yml              # Local dev + optional PostgreSQL
 ├── Makefile                        # Dev commands (install, dev, test, docker-*)
 ├── requirements.txt                # Legacy dependency list (used by Docker build)
 ├── alembic.ini                     # Alembic config
-├── cloudbuild.yaml                 # GCP Cloud Build pipeline
-├── DEPLOY_CLOUD_RUN.md            # Cloud Run deployment guide
 ├── .env.example                    # Template for env vars
 ├── data/                           # SQLite database lives here (gitignored)
 ├── scripts/
-│   ├── run.py                      # Runs both Streamlit + API concurrently (for Docker)
-│   └── run_cloudrun.py             # Cloud Run entry point
+│   └── run.py                      # Runs both Streamlit + API concurrently (for Docker)
 ├── src/
 │   ├── __init__.py
 │   ├── main.py                     # Actual CLI entry point (same as root main.py)
@@ -235,9 +230,6 @@ docker compose --profile db up -d
 
 ## 11. Deployment
 
-- **Cloud Run** via `Dockerfile.cloudrun` + `scripts/run_cloudrun.py`
-- **Cloud Build** pipeline defined in `cloudbuild.yaml`
-- See `DEPLOY_CLOUD_RUN.md` for detailed instructions
 - For production: set `DATABASE_URL` to PostgreSQL, run `alembic upgrade head`
 
 ---
