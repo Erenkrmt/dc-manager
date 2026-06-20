@@ -133,7 +133,7 @@ class TestAddToStash:
 
     def test_add_to_empty_stash(self):
         """Adding to a fresh (default) stash should set the values."""
-        stash = db.add_to_stash(
+        db.add_to_stash(
             iron_blocks=5,
             iron_ingots=10,
             gold_blocks=3,

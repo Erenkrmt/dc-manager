@@ -8,13 +8,13 @@ import sys
 import os
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
 
 # Ensure the project root is on sys.path so src.* imports resolve
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from src.core import database as db
 from src.core.settings import get_settings
 
@@ -87,7 +87,6 @@ def _require_admin(api_key: str) -> dict:
 # ---------------------------------------------------------------------------
 # CORS middleware
 # ---------------------------------------------------------------------------
-from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -2,7 +2,6 @@
 """Entry point for the DC Trade API – CLI tool."""
 
 import sys
-import logging
 from src.core import database as db
 from src.utils.console_ui import main_loop
 

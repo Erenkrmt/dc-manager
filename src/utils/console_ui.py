@@ -1,6 +1,5 @@
 # src/utils/console_ui.py
 import os
-import sys
 import json
 import logging
 from pathlib import Path
@@ -431,7 +430,7 @@ def quick_converter(
     print(f"As stacks:       {stacks} stacks + {rest_items} items")
     print(f"In shulkers:     ~{shulkers:.2f} shulker boxes")
     print("--------------------------------------------")
-    print(f"💰 Estimated market value (current live prices):")
+    print("💰 Estimated market value (current live prices):")
     print(f"   Iron:     {iron_value:>10.2f}$")
     print(f"   Gold:      {gold_value:>10.2f}$")
     print(f"   Diamonds: {diamond_value:>10.2f}$")

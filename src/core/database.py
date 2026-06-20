@@ -10,7 +10,7 @@ import logging
 import secrets
 import hashlib
 from datetime import datetime, timezone
-from typing import Optional, Union, Any
+from typing import Optional
 
 from src.core.settings import get_settings
 
@@ -296,7 +296,6 @@ def init_db() -> None:
 
 def _run_pg_migrations(cursor, conn) -> None:
     """PostgreSQL-specific column additions — safe dynamic SQL with allowlist."""
-    from psycopg2 import sql as pgsql
     # Allowed column names — validated against allowlist to prevent SQL injection
     for col in ["auto_subtract", "raw_iron_blocks", "raw_gold_blocks"]:
         if col not in _ALLOWED_STASH_COLUMNS:
@@ -815,7 +814,7 @@ def delete_deal(deal_id: int, company_id: int = 1) -> bool:
         conn.close()
         logger.info("Deal %d deleted.", deal_id)
         return True
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to delete deal %d", deal_id)
         return False
 
@@ -854,7 +853,7 @@ def save_template(
         conn.close()
         logger.info("Template '%s' saved.", name)
         return True
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to save template")
         return False
 
@@ -872,7 +871,7 @@ def load_templates(company_id: int = 1) -> list:
         rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to load templates")
         return []
 
@@ -891,7 +890,7 @@ def delete_template(name: str, company_id: int = 1) -> bool:
         conn.close()
         logger.info("Template '%s' deleted.", name)
         return True
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to delete template")
         return False
 
@@ -919,7 +918,7 @@ def save_price_snapshot(
         )
         conn.commit()
         conn.close()
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to save price snapshot")
 
 
@@ -940,7 +939,7 @@ def get_price_history(days: int = 30, company_id: int = 1) -> list:
         rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to fetch price history")
         return []
 
@@ -968,7 +967,7 @@ def get_all_deals(limit: int = 100, company_id: int = 1) -> list:
         rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to fetch deals")
         return []
 
@@ -1008,7 +1007,7 @@ def get_deal_stats(company_id: int = 1) -> dict:
             "total_deals": 0, "accepted": 0, "rejected": 0,
             "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to fetch deal stats")
         return {
             "total_deals": 0, "accepted": 0, "rejected": 0,
@@ -1045,7 +1044,7 @@ def log_item_deal(
         conn.commit()
         conn.close()
         logger.info("Item lookup deal logged: %s | %s | %s", item_name, status, date_str)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to log item lookup deal")
 
 
@@ -1068,7 +1067,7 @@ def get_item_lookup_deals(limit: int = 100, company_id: int = 1) -> list:
         rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to fetch item lookup deals")
         return []
 
@@ -1108,7 +1107,7 @@ def get_item_lookup_stats(company_id: int = 1) -> dict:
             "total_deals": 0, "accepted": 0, "rejected": 0,
             "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to fetch item lookup stats")
         return {
             "total_deals": 0, "accepted": 0, "rejected": 0,
@@ -1130,7 +1129,7 @@ def delete_item_lookup_deal(deal_id: int, company_id: int = 1) -> bool:
         conn.close()
         logger.info("Item lookup deal %d deleted.", deal_id)
         return True
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to delete item lookup deal %d", deal_id)
         return False
 
@@ -1231,7 +1230,7 @@ def save_stash(data: dict, company_id: int = 1) -> None:
         conn.commit()
         conn.close()
         logger.info("Stash saved for company %d.", company_id)
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to save stash to database")
 
 
@@ -1361,7 +1360,6 @@ def subtract_from_stash(
         total_ingot_amount: int,
         ingots_per_block: int,
     ) -> tuple:
-        total_available = stash_blocks * ingots_per_block + stash_ingots
         amount = total_ingot_amount
         blocks_to_use = min(stash_blocks, amount // ingots_per_block)
         remaining = amount - (blocks_to_use * ingots_per_block)

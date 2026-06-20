@@ -8,13 +8,10 @@ import os
 import logging
 import subprocess
 import threading
-import hashlib
 import hmac
-import json
 import secrets
 from pathlib import Path
-from urllib.parse import urlencode, parse_qs
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 # Ensure the project root is on sys.path so src.* imports resolve
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -22,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 import streamlit as st
 import pandas as pd
 
-from src.core.market_deal import MarketDeal, analyze_deal, stash_ingot_equivalents, format_subtract_result, fetch_live_prices, stash_market_value, total_stash_shipping
+from src.core.market_deal import MarketDeal, analyze_deal, stash_ingot_equivalents, fetch_live_prices, stash_market_value, total_stash_shipping
 from src.core.settings import get_settings
 from src.core import database as db
 from src.web.discord_oauth import get_authorize_url, get_avatar_url
@@ -558,7 +555,7 @@ def _log_deal_with_all_fields(  # noqa: PLR0913 - many parameters needed for all
         conn.commit()
         conn.close()
         logging.getLogger(__name__).info("Deal logged to database: %s | %s", status, date_str)
-    except Exception as exc:
+    except Exception:
         logging.getLogger(__name__).exception("Failed to log deal")
 
 

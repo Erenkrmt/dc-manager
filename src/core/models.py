@@ -5,7 +5,7 @@ Used by Alembic for migrations, and can replace raw SQL in database.py.
 """
 
 from sqlalchemy import (
-    Column, Integer, Float, Text, CheckConstraint, ForeignKey, UniqueConstraint
+    Column, Integer, Float, Text, ForeignKey, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase
 
