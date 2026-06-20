@@ -234,7 +234,9 @@ class TestPricesEndpoint:
         def _mock_fetch_live_prices(*args, **kwargs):
             return (5.0, 10.0, 20.0, {})
 
-        monkeypatch.setattr("src.core.market_deal.fetch_live_prices", _mock_fetch_live_prices)
+        monkeypatch.setattr(
+            "src.core.market_deal.fetch_live_prices", _mock_fetch_live_prices
+        )
         r = client.get("/prices")
         assert r.status_code == 200
         data = r.json()
