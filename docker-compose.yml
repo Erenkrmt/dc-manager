@@ -1,22 +1,17 @@
 # =============================================================================
 # docker-compose.yml – DC Trade Toolbox
 #
-# EINFACH STARTEN (SQLite – kein Setup nötig):
-#   docker compose up -d
+# Deploy on Dockge: paste this file, then set environment variables.
+# The app pulls the pre-built image from GHCR.
 #
-# MIT PostgreSQL (optional):
+# PostgreSQL (optional):
 #   docker compose --profile db up -d
 # =============================================================================
 
 services:
   # ---------- Main application (Streamlit + FastAPI) ----------
   app:
-    image: dc-trade:latest
-    build:
-      context: .
-      # BuildKit is auto-enabled in Docker v24+.
-      # For older Docker, set DOCKER_BUILDKIT=1 in your shell:
-      #   DOCKER_BUILDKIT=1 docker compose build
+    image: ghcr.io/erenkrmt/dc-trade:latest
     container_name: dc-trade
     restart: unless-stopped
     ports:
@@ -25,6 +20,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: false                  # graceful fallback to SQLite
     environment:
       - DC_API_KEY=${DC_API_KEY:-}
       - COMPANY_NAME=${COMPANY_NAME:-Fishy Business}
@@ -42,6 +38,10 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
     volumes:
       - dc_trade_data:/app/data
+    labels:
+      - "org.dockge.name=DC Trade Toolbox"
+      - "org.dockge.description=DemocracyCraft Trading Toolbox – Bulk trading calculator, shulker scanner & unit converter"
+      - "org.dockge.category=Tools"
 
   # ---------- PostgreSQL (optional – für Produktion) ----------
   postgres:

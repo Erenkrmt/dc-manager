@@ -37,6 +37,17 @@ docker compose --profile db up -d
 # → REST API: http://localhost:8000
 ```
 
+### Option 3: Dockge (home server deployment)
+
+If you run [Dockge](https://github.com/louislam/dockge) on your home server:
+
+1. In Dockge, click **Create Stack**
+2. Paste the contents of `docker-compose.yml` into the compose editor
+3. Click **Environment** → add your variables (see below)
+4. Click **Deploy**
+
+The app will be pulled from the pre-built image at `ghcr.io/erenkrmt/dc-trade:latest`.
+
 ## 📋 Features
 
 - **💰 Deal Calculator** – Enter material amounts and get instant deal analysis
@@ -65,16 +76,93 @@ make docker-build
 make docker-up
 ```
 
-## 🐳 Deployment
+## 🐳 Docker Deployment Guide
 
-### Production with Docker
+This project uses a **pre-built image** hosted on GitHub Container Registry (`ghcr.io/erenkrmt/dc-trade`). Every push to `main` triggers a GitHub Action that builds and pushes a new image automatically.
+
+### Local Docker (development)
 
 ```bash
-# Build and start
-docker compose --profile db up -d --build
+# Build locally from source
+docker compose build
 
-# Set your API key in docker-compose.yml or .env
+# Start with SQLite (default – no setup needed)
+docker compose up -d
+
+# Start with PostgreSQL (production-like)
+docker compose --profile db up -d
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
 ```
+
+### Auto-build with GitHub Actions
+
+The CI workflow (`.github/workflows/docker-publish.yml`) runs on every push to `main`:
+
+1. Logs into GitHub Container Registry using the automatic `GITHUB_TOKEN`
+2. Builds the Docker image
+3. Pushes two tags:
+   - `ghcr.io/erenkrmt/dc-trade:latest`
+   - `ghcr.io/erenkrmt/dc-trade:<commit-sha>`
+
+No secrets to configure — the `GITHUB_TOKEN` is provided automatically by GitHub.
+
+### Deploy on Dockge (home server)
+
+[Dockge](https://github.com/louislam/dockge) is a Docker Compose manager with a web UI. To deploy:
+
+**1. Decrypt your environment file**
+
+On your local machine (where the age key is available):
+```bash
+# Install sops + age if needed
+# brew install sops age   or   apt install sops age
+
+# Decrypt the encrypted .env
+sops -d .env.encrypted
+```
+
+Copy the output — you'll paste it into Dockge.
+
+**2. Create a stack in Dockge**
+
+In the Dockge web UI:
+- Click **Create Stack**
+- Paste the contents of `docker-compose.yml` into the compose editor
+- Click **Environment** tab → paste the decrypted env vars
+- Set the stack name (e.g., `dc-trade`)
+- Click **Deploy**
+
+Dockge will pull `ghcr.io/erenkrmt/dc-trade:latest` and start the container.
+
+**3. Access the services**
+
+| Service  | Port | URL                     |
+|----------|------|-------------------------|
+| Web UI   | 8501 | `http://your-server:8501` |
+| REST API | 8000 | `http://your-server:8000` |
+| API Docs | 8000 | `http://your-server:8000/docs` |
+
+**4. Update to a new version**
+
+Push to `main` → GitHub Action builds a new image → In Dockge click **Update** on the stack → Done.
+
+### Using PostgreSQL in production
+
+To switch from SQLite to PostgreSQL:
+
+1. Uncomment/Set these environment variables in Dockge:
+   ```
+   DATABASE_URL=postgres://dctrade:YOUR_PASSWORD_HERE@postgres:5432/dctrade
+   POSTGRES_PASSWORD=YOUR_PASSWORD_HERE
+   POSTGRES_USER=dctrade
+   POSTGRES_DB=dctrade
+   ```
+2. In the compose editor, add `--profile db` to the stack, OR enable the profile in Dockge by adding the `db` profile to the `app` service's `profiles` list.
 
 ### Environment Variables
 

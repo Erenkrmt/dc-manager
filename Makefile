@@ -42,7 +42,7 @@ env: ## Decrypt .env.encrypted → .env (OS-agnostic, requires sops + age key)
 env-encrypt: ## Encrypt .env → .env.encrypted (OS-agnostic, requires sops + age key)
 	python scripts/encrypt_env.py
 
-install-hooks: ## Install git pre-commit hook (auto-encrypt .env on commit)
+install-hooks: ## Install git hooks (pre-commit: encrypt, post-merge: decrypt)
 	python scripts/install_hooks.py
 
 test: ## Run tests

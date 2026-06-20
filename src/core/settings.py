@@ -7,15 +7,63 @@ Loads from environment variables and .env files.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from functools import lru_cache
 from dotenv import load_dotenv
 
 # Determine the project root (two levels up from this file: src/core/ -> src/ -> /)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _PROJECT_ROOT / ".env"
+_ENCRYPTED_ENV_FILE = _PROJECT_ROOT / ".env.encrypted"
+
+
+def _auto_decrypt_env() -> None:
+    """
+    Auto-decrypt .env.encrypted → .env at startup if .env is missing.
+    
+    This is a safety net for scenarios where the post-merge hook wasn't
+    installed or didn't fire (e.g., first clone, Docker build).
+    Requires sops CLI and age key to be available; fails gracefully otherwise.
+    """
+    if _ENV_FILE.exists():
+        return  # Already have a decrypted .env, nothing to do
+
+    if not _ENCRYPTED_ENV_FILE.exists():
+        return  # Nothing encrypted to decrypt
+
+    sops_path = shutil.which("sops")
+    if not sops_path:
+        return  # sops not installed; settings will use defaults
+
+    # Resolve age key file
+    key_file_env = os.environ.get("SOPS_AGE_KEY_FILE")
+    key_file = Path(key_file_env) if key_file_env else Path.home() / ".config" / "sops" / "age" / "keys.txt"
+    if not key_file.exists():
+        return  # No age key found; settings will use defaults
+
+    env = os.environ.copy()
+    env["SOPS_AGE_KEY_FILE"] = str(key_file)
+
+    result = subprocess.run(
+        [sops_path, "--decrypt", "--input-type", "dotenv", "--output-type", "dotenv", str(_ENCRYPTED_ENV_FILE)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    if result.returncode != 0:
+        return  # Decryption failed; settings will use defaults
+
+    _ENV_FILE.write_text(result.stdout, encoding="utf-8")
+
+
+# Try to auto-decrypt before loading .env
+_auto_decrypt_env()
 
 # Load .env file from the project root (explicit path to avoid CWD issues)
-load_dotenv(_PROJECT_ROOT / ".env")
+load_dotenv(_ENV_FILE)
 
 
 class Settings:
