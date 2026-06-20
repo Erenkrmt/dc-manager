@@ -115,25 +115,23 @@ No secrets to configure — the `GITHUB_TOKEN` is provided automatically by GitH
 
 [Dockge](https://github.com/louislam/dockge) is a Docker Compose manager with a web UI. To deploy:
 
-**1. Decrypt your environment file**
+**1. Copy the environment template**
 
-On your local machine (where the age key is available):
-```bash
-# Install sops + age if needed
-# brew install sops age   or   apt install sops age
+Open `.env.example` from this repo — it lists all available variables. Create your own list with real values:
 
-# Decrypt the encrypted .env
-sops -d .env.encrypted
+```
+DC_API_KEY=your_actual_api_key
+COMPANY_NAME=Fishy Business
 ```
 
-Copy the output — you'll paste it into Dockge.
+You only need `DC_API_KEY` to get started. The rest are optional (see table below).
 
 **2. Create a stack in Dockge**
 
 In the Dockge web UI:
 - Click **Create Stack**
 - Paste the contents of `docker-compose.yml` into the compose editor
-- Click **Environment** tab → paste the decrypted env vars
+- Click **Environment** tab → paste your env vars
 - Set the stack name (e.g., `dc-trade`)
 - Click **Deploy**
 
