@@ -35,7 +35,19 @@ def main() -> None:
     api_ssl_args: list[str] = []
     streamlit_ssl_args: list[str] = []
 
-    if ssl_enabled and ssl_certfile and ssl_keyfile:
+    if ssl_enabled:
+        if not ssl_certfile or not ssl_keyfile:
+            logger.error(
+                "SSL_ENABLED=true but SSL_CERTFILE and/or SSL_KEYFILE are empty. "
+                "Set both paths or disable SSL."
+            )
+            sys.exit(1)
+        if not os.path.isfile(ssl_certfile):
+            logger.error("SSL certificate file not found: %s", ssl_certfile)
+            sys.exit(1)
+        if not os.path.isfile(ssl_keyfile):
+            logger.error("SSL key file not found: %s", ssl_keyfile)
+            sys.exit(1)
         logger.info("SSL is ENABLED — using certfile=%s keyfile=%s", ssl_certfile, ssl_keyfile)
         # uvicorn SSL flags
         api_ssl_args = ["--ssl-certfile", ssl_certfile, "--ssl-keyfile", ssl_keyfile]

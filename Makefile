@@ -16,10 +16,10 @@ dev: ## Start both Streamlit + FastAPI for development
 	python scripts/run.py
 
 streamlit: ## Start only Streamlit (web UI)
-	streamlit run src/web/app.py --server.port 8501
+	streamlit run src/web/app.py --server.port 8501 --server.headless true $(SSL_STREAMLIT_ARGS)
 
 api: ## Start only FastAPI (REST API)
-	uvicorn src.web.api:app --reload --host 0.0.0.0 --port 8000
+	uvicorn src.web.api:app --reload --host 0.0.0.0 --port 8000 $(SSL_UVICORN_ARGS)
 
 docker-build: ## Build Docker image
 	docker compose build

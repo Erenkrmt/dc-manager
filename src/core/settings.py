@@ -104,7 +104,6 @@ class Settings:
     # Discord OAuth 2.0 — set these in .env for production
     DISCORD_CLIENT_ID: str = os.getenv("DISCORD_CLIENT_ID", "")
     DISCORD_CLIENT_SECRET: str = os.getenv("DISCORD_CLIENT_SECRET", "")
-    DISCORD_REDIRECT_URI: str = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8501/")
     # Comma-separated list of Discord user IDs that have admin access
     ADMIN_DISCORD_IDS: list[str] = [
         x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip()
@@ -115,6 +114,21 @@ class Settings:
     SESSION_SECRET: str = os.getenv("SESSION_SECRET", "")
     # API key prefix format
     API_KEY_PREFIX: str = "dc_"
+
+    # -- Computed Discord redirect URI ----------------------------------
+    @property
+    def DISCORD_REDIRECT_URI(self) -> str:
+        """
+        Return the Discord OAuth redirect URI.
+        When SSL is enabled, automatically upgrades http:// → https://
+        so the user doesn't have to manually adjust DISCORD_REDIRECT_URI.
+        """
+        uri = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8501/")
+        ssl_enabled = os.getenv("SSL_ENABLED", "").lower() in ("1", "true", "yes")
+        if ssl_enabled and uri.startswith("http://"):
+            https_uri = "https://" + uri[len("http://"):]
+            return https_uri
+        return uri
 
     # ── Server ───────────────────────────────────────────────────────────
     STREAMLIT_PORT: int = int(os.getenv("STREAMLIT_PORT", "8501"))
@@ -128,6 +142,12 @@ class Settings:
     SSL_ENABLED: bool = os.getenv("SSL_ENABLED", "").lower() in ("1", "true", "yes")
     SSL_CERTFILE: str = os.getenv("SSL_CERTFILE", "")
     SSL_KEYFILE: str = os.getenv("SSL_KEYFILE", "")
+
+    # ── Database SSL mode (PostgreSQL only) ────────────────────────────
+    # psycopg2 sslmode value: disable, allow, prefer, require, verify-ca, verify-full
+    # When empty (default), auto-detected: "require" for remote hosts,
+    # "disable" for localhost/postgres/127.0.0.1.
+    DATABASE_SSLMODE: str = os.getenv("DATABASE_SSLMODE", "")
 
     # ── Fallback prices ──────────────────────────────────────────────────
     FALLBACK_PRICES: dict[str, float] = {

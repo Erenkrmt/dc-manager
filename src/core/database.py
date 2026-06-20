@@ -43,10 +43,12 @@ else:
 def get_connection():
     """Create and return a database connection (SQLite or PostgreSQL)."""
     if _USE_POSTGRES:
-        # Only require SSL when connecting to a remote host (Cloud SQL, etc.)
-        # For local Docker PostgreSQL (hostname "postgres" or "localhost"), skip SSL
-        _host = _settings.DATABASE_URL.split("@")[-1].split(":")[0]
-        _sslmode = "require" if _host not in ("postgres", "localhost", "127.0.0.1") else "disable"
+        # Determine sslmode: explicit env var wins, else auto-detect
+        _sslmode = _settings.DATABASE_SSLMODE
+        if not _sslmode:
+            # Auto-detect: require for remote hosts, disable for local ones
+            _host = _settings.DATABASE_URL.split("@")[-1].split(":")[0]
+            _sslmode = "require" if _host not in ("postgres", "localhost", "127.0.0.1") else "disable"
         conn = psycopg2.connect(
             _settings.DATABASE_URL,
             sslmode=_sslmode,

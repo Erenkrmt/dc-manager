@@ -52,9 +52,9 @@ COPY main.py ./
 # Create data directory with correct permissions
 RUN mkdir -p /app/data && chmod -R 755 /app/data
 
-# Health check
+# Health check (works with both HTTP and HTTPS)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import os,urllib.request; p='https' if os.getenv('SSL_ENABLED','').lower() in ('1','true','yes') else 'http'; urllib.request.urlopen(p+'://localhost:8000/health',timeout=5)" || exit 1
 
 # Expose ports: 8501 (Streamlit), 8000 (FastAPI)
 EXPOSE 8501 8000

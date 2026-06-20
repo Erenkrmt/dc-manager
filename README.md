@@ -149,6 +149,59 @@ Dockge will pull `ghcr.io/erenkrmt/dc-trade:latest` and start the container.
 
 Push to `master` → GitHub Action builds a new image → In Dockge click **Update** on the stack → Done.
 
+### 🔒 Enabling SSL / HTTPS
+
+When deploying publicly, you should enable SSL so both the Web UI and REST API are served over HTTPS.
+
+**1. Set environment variables**
+
+Add these to your `.env` (or Dockge Environment tab):
+
+```
+SSL_ENABLED=true
+SSL_CERTFILE=/app/certs/fullchain.pem
+SSL_KEYFILE=/app/certs/privkey.pem
+```
+
+**2. Mount your certificates**
+
+If using `docker-compose.yml`, uncomment the `certs` volume:
+
+```yaml
+volumes:
+  - dc_trade_data:/app/data
+  # - ./certs:/app/certs:ro      # ← uncomment and point to your cert directory
+```
+
+If running via `docker run`:
+
+```bash
+docker run -d --name dc-trade -p 443:8501 -p 8443:8000 \
+  -e DC_API_KEY="..." \
+  -e SSL_ENABLED=true \
+  -e SSL_CERTFILE=/app/certs/fullchain.pem \
+  -e SSL_KEYFILE=/app/certs/privkey.pem \
+  -v /host/path/to/certs:/app/certs:ro \
+  ghcr.io/erenkrmt/dc-trade:latest
+```
+
+**3. Discord OAuth**
+
+When SSL is enabled and `DISCORD_REDIRECT_URI` starts with `http://`, the application **automatically upgrades** it to `https://`. No manual change needed.
+
+**4. Local testing (self-signed certificates)**
+
+```bash
+# Generate a self-signed cert
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout privkey.pem -out fullchain.pem \
+  -subj "/CN=localhost"
+
+# Then set SSL_ENABLED=true and point to these files
+```
+
+---
+
 ### Using PostgreSQL in production
 
 To switch from SQLite to PostgreSQL:
@@ -169,10 +222,14 @@ To switch from SQLite to PostgreSQL:
 | `DC_API_KEY` | `""` | **Required.** DemocracyCraft API key |
 | `COMPANY_NAME` | `Fishy Business` | Branding in UI |
 | `DATABASE_URL` | *(SQLite)* | PostgreSQL connection string for production |
+| `DATABASE_SSLMODE` | *(auto)* | PostgreSQL SSL mode: `disable`, `require`, `verify-ca`, etc. Empty = auto-detect |
 | `API_TIMEOUT` | `10` | Seconds before API timeout |
 | `API_RETRIES` | `3` | Number of API retries |
 | `MIN_ACCEPTABLE_PERCENT` | `0.85` | Minimum deal threshold (85%) |
 | `CACHE_DURATION` | `21600` | Price cache TTL in seconds (6h) |
+| `SSL_ENABLED` | `false` | Set `true` to serve HTTPS (requires cert files) |
+| `SSL_CERTFILE` | `""` | Path to SSL certificate file (e.g. `/app/certs/fullchain.pem`) |
+| `SSL_KEYFILE` | `""` | Path to SSL private key file (e.g. `/app/certs/privkey.pem`) |
 | `DEBUG` | `false` | Enable debug mode |
 
 ## 🗄️ Database

@@ -40,8 +40,12 @@ services:
       # PostgreSQL connection
       - DATABASE_URL=${DATABASE_URL:-}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+      # PostgreSQL SSL mode (disable, require, verify-full, etc. — empty = auto-detect)
+      - DATABASE_SSLMODE=${DATABASE_SSLMODE:-}
     volumes:
       - dc_trade_data:/app/data
+      # Uncomment below and adjust paths to mount SSL certificates:
+      # - ./certs:/app/certs:ro
     labels:
       - "org.dockge.name=DC Trade Toolbox"
       - "org.dockge.description=DemocracyCraft Trading Toolbox – Bulk trading calculator, shulker scanner & unit converter"
