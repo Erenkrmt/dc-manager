@@ -4,7 +4,14 @@ import json
 import logging
 from pathlib import Path
 
-from src.core.market_deal import MarketDeal, analyze_deal, stash_ingot_equivalents, format_subtract_result, handle_stash_subtraction, fetch_live_prices
+from src.core.market_deal import (
+    MarketDeal,
+    analyze_deal,
+    stash_ingot_equivalents,
+    format_subtract_result,
+    handle_stash_subtraction,
+    fetch_live_prices,
+)
 from src.core.settings import get_settings
 from src.core import database as db
 
@@ -73,7 +80,9 @@ def input_unit(name: str, amount: float) -> str:
 # ---------------------------------------------------------------------------
 # Stash subtraction helper (shared by Mode 1 and Mode 2)
 # ---------------------------------------------------------------------------
-def _offer_stash_subtraction(iron_ingots: int, gold_ingots: int, diamond_items: int, used_stash: bool = False) -> None:
+def _offer_stash_subtraction(
+    iron_ingots: int, gold_ingots: int, diamond_items: int, used_stash: bool = False
+) -> None:
     """
     After a deal, offer to subtract materials from stash.
     If auto-subtract is ON, do it silently. Otherwise ask.
@@ -81,7 +90,9 @@ def _offer_stash_subtraction(iron_ingots: int, gold_ingots: int, diamond_items: 
     global _COMPANY_ID
 
     result = handle_stash_subtraction(
-        iron_ingots, gold_ingots, diamond_items,
+        iron_ingots,
+        gold_ingots,
+        diamond_items,
         company_id=_COMPANY_ID,
     )
     if result is None:
@@ -101,7 +112,9 @@ def _offer_stash_subtraction(iron_ingots: int, gold_ingots: int, diamond_items: 
             choice = default_choice
 
         if choice == "y":
-            result = db.subtract_from_stash(iron_ingots, gold_ingots, diamond_items, company_id=_COMPANY_ID)
+            result = db.subtract_from_stash(
+                iron_ingots, gold_ingots, diamond_items, company_id=_COMPANY_ID
+            )
             formatted = format_subtract_result(result)
             if formatted:
                 print(f"✅ Subtracted from stash: {formatted}")
@@ -136,23 +149,31 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
             print("\n📦 Loaded from stash:")
             print(f"   Iron:     {MarketDeal.format_bulk_storage(total_iron)}")
             print(f"   Gold:     {MarketDeal.format_bulk_storage(total_gold)}")
-            print(f"   Diamonds: {MarketDeal.format_bulk_storage(total_diamond, is_diamond=True)}")
+            print(
+                f"   Diamonds: {MarketDeal.format_bulk_storage(total_diamond, is_diamond=True)}"
+            )
 
-            override_iron = safe_float_input("Override iron amount (leave empty to keep): ")
+            override_iron = safe_float_input(
+                "Override iron amount (leave empty to keep): "
+            )
             if override_iron > 0:
                 iron_amount = override_iron
                 iron_unit = input_unit("Iron (override)", iron_amount)
             else:
                 iron_amount = float(total_iron)
 
-            override_gold = safe_float_input("Override gold amount (leave empty to keep): ")
+            override_gold = safe_float_input(
+                "Override gold amount (leave empty to keep): "
+            )
             if override_gold > 0:
                 gold_amount = override_gold
                 gold_unit = input_unit("Gold (override)", gold_amount)
             else:
                 gold_amount = float(total_gold)
 
-            override_diamond = safe_float_input("Override diamond amount (leave empty to keep): ")
+            override_diamond = safe_float_input(
+                "Override diamond amount (leave empty to keep): "
+            )
             if override_diamond > 0:
                 diamond_amount = override_diamond
                 diamond_unit = input_unit("Diamond (override)", diamond_amount)
@@ -179,12 +200,18 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
     diamond_items = MarketDeal.convert_to_ingots(diamond_amount, diamond_unit)
 
     _calculate_and_show_result(
-        iron_ingots, gold_ingots, diamond_items,
-        price_iron, price_gold, price_diamond,
+        iron_ingots,
+        gold_ingots,
+        diamond_items,
+        price_iron,
+        price_gold,
+        price_diamond,
     )
 
     # Offer stash subtraction
-    _offer_stash_subtraction(int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash)
+    _offer_stash_subtraction(
+        int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +227,7 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
     def get_material_count(name: str, is_block: bool) -> int:
         """Read full stacks and remainder for a material from the user."""
         type_str = "BLOCKS" if is_block else "INGOTS/ITEMS"
-        full_stacks = safe_int_input(
-            f"  -> Full stacks (64) {name}-{type_str}: "
-        )
+        full_stacks = safe_int_input(f"  -> Full stacks (64) {name}-{type_str}: ")
         rest = safe_int_input(
             f"     Partial remainder stack (0-63) {name}-{type_str}: ",
         )
@@ -218,7 +243,11 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
     if load_stash_choice == "y":
         stash = db.load_stash(company_id=_COMPANY_ID)
         total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
-        if stash and stash.get("updated_at") != "never" and (total_iron or total_gold or total_diamond):
+        if (
+            stash
+            and stash.get("updated_at") != "never"
+            and (total_iron or total_gold or total_diamond)
+        ):
             used_stash = True
             print("\n📦 Loaded from stash (you can override individual values):")
 
@@ -236,7 +265,9 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
             di_blocks_count = stash["diamond_blocks"]
             di_items_count = stash["diamond_items"]
             print(f"\n💎 DIAMONDS: {di_blocks_count} blocks, {di_items_count} items")
-            print("   (Enter raw numbers – not stacks. Leave empty to keep stash value.)")
+            print(
+                "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
+            )
             di_blocks_count = _override_val("   Diamond blocks: ", di_blocks_count)
             di_items_count = _override_val("   Diamond items:  ", di_items_count)
             total_diamond = di_blocks_count * INGOTS_PER_BLOCK + di_items_count
@@ -245,7 +276,9 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
             ir_blocks_count = stash["iron_blocks"]
             ir_items_count = stash["iron_ingots"]
             print(f"\n⬜ IRON: {ir_blocks_count} blocks, {ir_items_count} ingots")
-            print("   (Enter raw numbers – not stacks. Leave empty to keep stash value.)")
+            print(
+                "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
+            )
             ir_blocks_count = _override_val("   Iron blocks: ", ir_blocks_count)
             ir_items_count = _override_val("   Iron ingots: ", ir_items_count)
             total_iron = ir_blocks_count * INGOTS_PER_BLOCK + ir_items_count
@@ -254,31 +287,39 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
             go_blocks_count = stash["gold_blocks"]
             go_items_count = stash["gold_ingots"]
             print(f"\n🟨 GOLD: {go_blocks_count} blocks, {go_items_count} ingots")
-            print("   (Enter raw numbers – not stacks. Leave empty to keep stash value.)")
+            print(
+                "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
+            )
             go_blocks_count = _override_val("   Gold blocks: ", go_blocks_count)
             go_items_count = _override_val("   Gold ingots: ", go_items_count)
             total_gold = go_blocks_count * INGOTS_PER_BLOCK + go_items_count
         else:
             print("⚠ No stash found. Please enter values manually.")
             print("\n💎 DIAMONDS:")
-            total_diamond = get_material_count("DIAMOND", is_block=True) + \
-                            get_material_count("DIAMOND", is_block=False)
+            total_diamond = get_material_count(
+                "DIAMOND", is_block=True
+            ) + get_material_count("DIAMOND", is_block=False)
             print("\n⬜ IRON:")
-            total_iron = get_material_count("IRON", is_block=True) + \
-                         get_material_count("IRON", is_block=False)
+            total_iron = get_material_count("IRON", is_block=True) + get_material_count(
+                "IRON", is_block=False
+            )
             print("\n🟨 GOLD:")
-            total_gold = get_material_count("GOLD", is_block=True) + \
-                         get_material_count("GOLD", is_block=False)
+            total_gold = get_material_count("GOLD", is_block=True) + get_material_count(
+                "GOLD", is_block=False
+            )
     else:
         print("\n💎 DIAMONDS:")
-        total_diamond = get_material_count("DIAMOND", is_block=True) + \
-                        get_material_count("DIAMOND", is_block=False)
+        total_diamond = get_material_count(
+            "DIAMOND", is_block=True
+        ) + get_material_count("DIAMOND", is_block=False)
         print("\n⬜ IRON:")
-        total_iron = get_material_count("IRON", is_block=True) + \
-                     get_material_count("IRON", is_block=False)
+        total_iron = get_material_count("IRON", is_block=True) + get_material_count(
+            "IRON", is_block=False
+        )
         print("\n🟨 GOLD:")
-        total_gold = get_material_count("GOLD", is_block=True) + \
-                     get_material_count("GOLD", is_block=False)
+        total_gold = get_material_count("GOLD", is_block=True) + get_material_count(
+            "GOLD", is_block=False
+        )
 
     multiplier = safe_int_input(
         "\nHow many times is this chest configuration delivered? (Multiplier, default = 1): ",
@@ -290,12 +331,18 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
     diamond_items = total_diamond * multiplier
 
     _calculate_and_show_result(
-        iron_ingots, gold_ingots, diamond_items,
-        price_iron, price_gold, price_diamond,
+        iron_ingots,
+        gold_ingots,
+        diamond_items,
+        price_iron,
+        price_gold,
+        price_diamond,
     )
 
     # Offer stash subtraction
-    _offer_stash_subtraction(int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash)
+    _offer_stash_subtraction(
+        int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -327,12 +374,18 @@ def _calculate_and_show_result(
     print(f"📉 Your Minimum (incl. discount): {min_needed_price:.2f}$")
     print("-" * 40)
 
-    offered_price = safe_float_input("\nWhat is the buyer offering for these goods? ($): ")
+    offered_price = safe_float_input(
+        "\nWhat is the buyer offering for these goods? ($): "
+    )
 
     # Use the shared analyze_deal function
     result = analyze_deal(
-        iron_ingots, gold_ingots, diamond_items,
-        price_iron, price_gold, price_diamond,
+        iron_ingots,
+        gold_ingots,
+        diamond_items,
+        price_iron,
+        price_gold,
+        price_diamond,
         offered_price=offered_price,
     )
 
@@ -348,42 +401,66 @@ def _calculate_and_show_result(
     print("\n== DELIVERY CONTENTS ==")
     print(f"📦 Iron total:      {MarketDeal.format_bulk_storage(iron_ingots)}")
     print(f"📦 Gold total:      {MarketDeal.format_bulk_storage(gold_ingots)}")
-    print(f"📦 Diamond total:   {MarketDeal.format_bulk_storage(diamond_items, is_diamond=True)}")
+    print(
+        f"📦 Diamond total:   {MarketDeal.format_bulk_storage(diamond_items, is_diamond=True)}"
+    )
     print(
         f"🚚 Shipping volume: ~{result['stacks']:.1f} stacks "
         f"({result['shulkers']:.2f} shulker boxes)"
     )
 
-    if result['stacks'] > 0:
-        print(f"📊 Margin:          {result['profit_loss'] / result['stacks']:.2f}$ per stack | {result['profit_loss'] / result['shulkers']:.2f}$ per shulker")
+    if result["stacks"] > 0:
+        print(
+            f"📊 Margin:          {result['profit_loss'] / result['stacks']:.2f}$ per stack | {result['profit_loss'] / result['shulkers']:.2f}$ per shulker"
+        )
 
     print("\n== FINANCIAL CHECK ==")
     print(f"Market value:    {result['market_value']:.2f}$")
-    print(f"Offered price:   {result['offered_price']:.2f}$ ({result['percent_of_market']:.1f}% of market)")
-    print(f"Your limit ({MarketDeal.MIN_ACCEPTABLE_PERCENT * 100:.0f}%): {result['min_needed_price']:.2f}$")
+    print(
+        f"Offered price:   {result['offered_price']:.2f}$ ({result['percent_of_market']:.1f}% of market)"
+    )
+    print(
+        f"Your limit ({MarketDeal.MIN_ACCEPTABLE_PERCENT * 100:.0f}%): {result['min_needed_price']:.2f}$"
+    )
     print("-" * 40)
     print(f"{result['status_emoji']} {result['status']}")
     print(f"   {result['status_msg']}")
 
     # Smart counter-offer logic on rejection
-    if result['status'] == "REJECTED":
+    if result["status"] == "REJECTED":
         counter = result.get("counter_offer")
         if counter is None:
-            print("\n💡 COUNTER-OFFER NOT POSSIBLE: The offer doesn't even cover the diamond value!")
+            print(
+                "\n💡 COUNTER-OFFER NOT POSSIBLE: The offer doesn't even cover the diamond value!"
+            )
         elif counter:
             print("\n💡 COUNTER-OFFER SUGGESTION:")
-            print(f"For ${result['offered_price']:.0f}, offer instead just the following:")
-            if result['iron_ingots'] > 0:
-                print(f" -> Iron:      {MarketDeal.format_bulk_storage(counter['iron'])}")
-            if result['gold_ingots'] > 0:
-                print(f" -> Gold:      {MarketDeal.format_bulk_storage(counter['gold'])}")
-            if result['diamond_items'] > 0:
-                print(f" -> Diamonds:  {MarketDeal.format_bulk_storage(counter['diamond'], is_diamond=True)} (unchanged)")
+            print(
+                f"For ${result['offered_price']:.0f}, offer instead just the following:"
+            )
+            if result["iron_ingots"] > 0:
+                print(
+                    f" -> Iron:      {MarketDeal.format_bulk_storage(counter['iron'])}"
+                )
+            if result["gold_ingots"] > 0:
+                print(
+                    f" -> Gold:      {MarketDeal.format_bulk_storage(counter['gold'])}"
+                )
+            if result["diamond_items"] > 0:
+                print(
+                    f" -> Diamonds:  {MarketDeal.format_bulk_storage(counter['diamond'], is_diamond=True)} (unchanged)"
+                )
 
     MarketDeal.log_deal(
-        iron_ingots, gold_ingots, diamond_items,
-        result['market_value'], offered_price, result['status'],
-        price_iron, price_gold, price_diamond,
+        iron_ingots,
+        gold_ingots,
+        diamond_items,
+        result["market_value"],
+        offered_price,
+        result["status"],
+        price_iron,
+        price_gold,
+        price_diamond,
         company_id=_COMPANY_ID,
     )
     print(f"\n💾 Deal saved to database ({_settings.DB_FILE}).")
@@ -449,9 +526,15 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
         print("=" * 50)
         stash = db.load_stash(company_id=_COMPANY_ID)
         # Calculate ingot totals for display
-        total_iron = stash.get("iron_blocks", 0) * INGOTS_PER_BLOCK + stash.get("iron_ingots", 0)
-        total_gold = stash.get("gold_blocks", 0) * INGOTS_PER_BLOCK + stash.get("gold_ingots", 0)
-        total_diamond = stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK + stash.get("diamond_items", 0)
+        total_iron = stash.get("iron_blocks", 0) * INGOTS_PER_BLOCK + stash.get(
+            "iron_ingots", 0
+        )
+        total_gold = stash.get("gold_blocks", 0) * INGOTS_PER_BLOCK + stash.get(
+            "gold_ingots", 0
+        )
+        total_diamond = stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK + stash.get(
+            "diamond_items", 0
+        )
 
         # Market value
         iron_value = total_iron * price_iron
@@ -466,12 +549,20 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
 
         print(f"\n📦 CURRENT STASH (last updated: {stash.get('updated_at', 'never')})")
         print("-" * 40)
-        print(f"  Iron:     {stash['iron_blocks']} blocks + {stash['iron_ingots']} ingots")
+        print(
+            f"  Iron:     {stash['iron_blocks']} blocks + {stash['iron_ingots']} ingots"
+        )
         print(f"           ({MarketDeal.format_bulk_storage(total_iron)})")
-        print(f"  Gold:     {stash['gold_blocks']} blocks + {stash['gold_ingots']} ingots")
+        print(
+            f"  Gold:     {stash['gold_blocks']} blocks + {stash['gold_ingots']} ingots"
+        )
         print(f"           ({MarketDeal.format_bulk_storage(total_gold)})")
-        print(f"  Diamonds: {stash['diamond_blocks']} blocks + {stash['diamond_items']} items")
-        print(f"           ({MarketDeal.format_bulk_storage(total_diamond, is_diamond=True)})")
+        print(
+            f"  Diamonds: {stash['diamond_blocks']} blocks + {stash['diamond_items']} items"
+        )
+        print(
+            f"           ({MarketDeal.format_bulk_storage(total_diamond, is_diamond=True)})"
+        )
         print("-" * 40)
         print(f"📊 Market value:  ${total_value:.2f}")
         print(f"   Iron:     ${iron_value:.2f}")
@@ -510,7 +601,11 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
             print("\n✅ Stash updated!")
 
         elif choice == "2":
-            confirm = input("Are you sure you want to clear the stash? (y/n): ").strip().lower()
+            confirm = (
+                input("Are you sure you want to clear the stash? (y/n): ")
+                .strip()
+                .lower()
+            )
             if confirm == "y":
                 db.clear_stash(company_id=_COMPANY_ID)
                 print("\n✅ Stash cleared!")
@@ -586,9 +681,13 @@ def _resolve_company() -> int | None:
         print("\n❌ Your account is inactive. Contact the admin.")
         return None
 
-    print(f"\n✅ Authenticated as {company.get('discord_username', company.get('company_name', 'User'))}")
+    print(
+        f"\n✅ Authenticated as {company.get('discord_username', company.get('company_name', 'User'))}"
+    )
     if _IS_READ_ONLY:
-        print("⚠️  **Read-only mode** — your access has expired. Contact Fishy Business to renew.")
+        print(
+            "⚠️  **Read-only mode** — your access has expired. Contact Fishy Business to renew."
+        )
     return _COMPANY_ID
 
 

@@ -4,9 +4,7 @@ SQLAlchemy ORM models for the DC Trade Toolbox.
 Used by Alembic for migrations, and can replace raw SQL in database.py.
 """
 
-from sqlalchemy import (
-    Column, Integer, Float, Text, ForeignKey, UniqueConstraint
-)
+from sqlalchemy import Column, Integer, Float, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -16,6 +14,7 @@ class Base(DeclarativeBase):
 
 class Company(Base):
     """Multi-company registration via Discord OAuth."""
+
     __tablename__ = "companies"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -83,9 +82,7 @@ class Stash(Base):
     auto_subtract = Column(Integer, default=0)
     updated_at = Column(Text, nullable=False)
 
-    __table_args__ = (
-        UniqueConstraint("company_id", name="uq_stash_company"),
-    )
+    __table_args__ = (UniqueConstraint("company_id", name="uq_stash_company"),)
 
 
 class Template(Base):

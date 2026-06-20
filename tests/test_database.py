@@ -16,6 +16,7 @@ from src.core import settings
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _temp_db(monkeypatch):
     """
@@ -35,6 +36,7 @@ def _temp_db(monkeypatch):
 # ---------------------------------------------------------------------------
 # Tests: Company management
 # ---------------------------------------------------------------------------
+
 
 class TestCompanyManagement:
     """Verify company CRUD and access control."""
@@ -128,6 +130,7 @@ class TestCompanyManagement:
 # Tests: add_to_stash
 # ---------------------------------------------------------------------------
 
+
 class TestAddToStash:
     """Verify that add_to_stash correctly adds materials to the existing stash."""
 
@@ -151,14 +154,16 @@ class TestAddToStash:
 
     def test_add_to_existing_stash(self):
         """Adding more materials should accumulate on top of existing values."""
-        db.save_stash({
-            "iron_blocks": 10,
-            "iron_ingots": 20,
-            "gold_blocks": 5,
-            "gold_ingots": 15,
-            "diamond_blocks": 3,
-            "diamond_items": 6,
-        })
+        db.save_stash(
+            {
+                "iron_blocks": 10,
+                "iron_ingots": 20,
+                "gold_blocks": 5,
+                "gold_ingots": 15,
+                "diamond_blocks": 3,
+                "diamond_items": 6,
+            }
+        )
         db.add_to_stash(
             iron_blocks=2,
             iron_ingots=3,
@@ -177,14 +182,16 @@ class TestAddToStash:
 
     def test_add_zero_values(self):
         """Adding all zeros should leave the stash unchanged."""
-        db.save_stash({
-            "iron_blocks": 1,
-            "iron_ingots": 2,
-            "gold_blocks": 3,
-            "gold_ingots": 4,
-            "diamond_blocks": 5,
-            "diamond_items": 6,
-        })
+        db.save_stash(
+            {
+                "iron_blocks": 1,
+                "iron_ingots": 2,
+                "gold_blocks": 3,
+                "gold_ingots": 4,
+                "diamond_blocks": 5,
+                "diamond_items": 6,
+            }
+        )
         db.add_to_stash()  # defaults to 0 for everything
         loaded = db.load_stash()
         assert loaded["iron_blocks"] == 1
@@ -196,14 +203,16 @@ class TestAddToStash:
 
     def test_add_partial_values(self):
         """Adding only some material types should only affect those fields."""
-        db.save_stash({
-            "iron_blocks": 10,
-            "iron_ingots": 0,
-            "gold_blocks": 0,
-            "gold_ingots": 0,
-            "diamond_blocks": 0,
-            "diamond_items": 0,
-        })
+        db.save_stash(
+            {
+                "iron_blocks": 10,
+                "iron_ingots": 0,
+                "gold_blocks": 0,
+                "gold_ingots": 0,
+                "diamond_blocks": 0,
+                "diamond_items": 0,
+            }
+        )
         db.add_to_stash(iron_blocks=5, diamond_items=3)
         loaded = db.load_stash()
         assert loaded["iron_blocks"] == 15
@@ -239,14 +248,16 @@ class TestAddToStash:
 
     def test_add_negative_values(self):
         """Adding negative values should reduce the stash (manual subtract)."""
-        db.save_stash({
-            "iron_blocks": 10,
-            "iron_ingots": 20,
-            "gold_blocks": 5,
-            "gold_ingots": 15,
-            "diamond_blocks": 3,
-            "diamond_items": 6,
-        })
+        db.save_stash(
+            {
+                "iron_blocks": 10,
+                "iron_ingots": 20,
+                "gold_blocks": 5,
+                "gold_ingots": 15,
+                "diamond_blocks": 3,
+                "diamond_items": 6,
+            }
+        )
         db.add_to_stash(
             iron_blocks=-3,
             iron_ingots=-5,
@@ -284,18 +295,21 @@ class TestAddToStash:
 # Tests: clear_stash
 # ---------------------------------------------------------------------------
 
+
 class TestClearStash:
     """Verify that clear_stash resets the stash to zeros."""
 
     def test_clear_nonempty_stash(self):
-        db.save_stash({
-            "iron_blocks": 10,
-            "iron_ingots": 20,
-            "gold_blocks": 3,
-            "gold_ingots": 7,
-            "diamond_blocks": 2,
-            "diamond_items": 5,
-        })
+        db.save_stash(
+            {
+                "iron_blocks": 10,
+                "iron_ingots": 20,
+                "gold_blocks": 3,
+                "gold_ingots": 7,
+                "diamond_blocks": 2,
+                "diamond_items": 5,
+            }
+        )
         db.clear_stash()
         loaded = db.load_stash()
         assert loaded["iron_blocks"] == 0
@@ -315,26 +329,35 @@ class TestClearStash:
 # Tests: load_stash / save_stash basics
 # ---------------------------------------------------------------------------
 
+
 class TestStashBasics:
     """Basic round-trip sanity checks."""
 
     def test_load_default_stash(self):
         """A fresh database should return the default (all zeros) stash."""
         loaded = db.load_stash()
-        for key in ("iron_blocks", "iron_ingots", "gold_blocks",
-                     "gold_ingots", "diamond_blocks", "diamond_items"):
+        for key in (
+            "iron_blocks",
+            "iron_ingots",
+            "gold_blocks",
+            "gold_ingots",
+            "diamond_blocks",
+            "diamond_items",
+        ):
             assert loaded[key] == 0
 
     def test_save_stash_updates_updated_at(self):
         """After saving, updated_at should not be 'never'."""
-        db.save_stash({
-            "iron_blocks": 1,
-            "iron_ingots": 2,
-            "gold_blocks": 3,
-            "gold_ingots": 4,
-            "diamond_blocks": 5,
-            "diamond_items": 6,
-        })
+        db.save_stash(
+            {
+                "iron_blocks": 1,
+                "iron_ingots": 2,
+                "gold_blocks": 3,
+                "gold_ingots": 4,
+                "diamond_blocks": 5,
+                "diamond_items": 6,
+            }
+        )
         loaded = db.load_stash()
         assert loaded["updated_at"] != "never"
 
@@ -342,6 +365,7 @@ class TestStashBasics:
 # ---------------------------------------------------------------------------
 # Tests: set_auto_subtract / get_auto_subtract
 # ---------------------------------------------------------------------------
+
 
 class TestAutoSubtract:
     """Verify auto-subtract toggle works correctly."""

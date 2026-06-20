@@ -22,7 +22,7 @@ _ENCRYPTED_ENV_FILE = _PROJECT_ROOT / ".env.encrypted"
 def _auto_decrypt_env() -> None:
     """
     Auto-decrypt .env.encrypted → .env at startup if .env is missing.
-    
+
     This is a safety net for scenarios where the post-merge hook wasn't
     installed or didn't fire (e.g., first clone, Docker build).
     Requires sops CLI and age key to be available; fails gracefully otherwise.
@@ -39,7 +39,11 @@ def _auto_decrypt_env() -> None:
 
     # Resolve age key file
     key_file_env = os.environ.get("SOPS_AGE_KEY_FILE")
-    key_file = Path(key_file_env) if key_file_env else Path.home() / ".config" / "sops" / "age" / "keys.txt"
+    key_file = (
+        Path(key_file_env)
+        if key_file_env
+        else Path.home() / ".config" / "sops" / "age" / "keys.txt"
+    )
     if not key_file.exists():
         return  # No age key found; settings will use defaults
 
@@ -47,7 +51,15 @@ def _auto_decrypt_env() -> None:
     env["SOPS_AGE_KEY_FILE"] = str(key_file)
 
     result = subprocess.run(
-        [sops_path, "--decrypt", "--input-type", "dotenv", "--output-type", "dotenv", str(_ENCRYPTED_ENV_FILE)],
+        [
+            sops_path,
+            "--decrypt",
+            "--input-type",
+            "dotenv",
+            "--output-type",
+            "dotenv",
+            str(_ENCRYPTED_ENV_FILE),
+        ],
         capture_output=True,
         text=True,
         env=env,
@@ -126,7 +138,7 @@ class Settings:
         uri = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8501/")
         ssl_enabled = os.getenv("SSL_ENABLED", "").lower() in ("1", "true", "yes")
         if ssl_enabled and uri.startswith("http://"):
-            https_uri = "https://" + uri[len("http://"):]
+            https_uri = "https://" + uri[len("http://") :]
             return https_uri
         return uri
 

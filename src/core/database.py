@@ -17,7 +17,9 @@ from src.core.settings import get_settings
 _settings = get_settings()
 
 # ── Allowed column names for safe dynamic migration queries ──
-_ALLOWED_STASH_COLUMNS = frozenset({"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"})
+_ALLOWED_STASH_COLUMNS = frozenset(
+    {"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"}
+)
 _ALLOWED_COMPANY_COLUMNS = frozenset({"session_token", "tier", "public_stash_token"})
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ if _USE_POSTGRES:
         raise
 else:
     import sqlite3
+
     os.makedirs(os.path.dirname(_settings.DB_FILE) or ".", exist_ok=True)
 
 
@@ -48,7 +51,11 @@ def get_connection():
         if not _sslmode:
             # Auto-detect: require for remote hosts, disable for local ones
             _host = _settings.DATABASE_URL.split("@")[-1].split(":")[0]
-            _sslmode = "require" if _host not in ("postgres", "localhost", "127.0.0.1") else "disable"
+            _sslmode = (
+                "require"
+                if _host not in ("postgres", "localhost", "127.0.0.1")
+                else "disable"
+            )
         conn = psycopg2.connect(
             _settings.DATABASE_URL,
             sslmode=_sslmode,
@@ -286,7 +293,9 @@ def init_db() -> None:
             conn.commit()
             _run_sqlite_migrations(conn)
 
-        logger.info("Database initialized (%s).", "PostgreSQL" if _USE_POSTGRES else "SQLite")
+        logger.info(
+            "Database initialized (%s).", "PostgreSQL" if _USE_POSTGRES else "SQLite"
+        )
     except Exception:
         logger.exception("Failed to initialize database")
         raise
@@ -319,8 +328,12 @@ def _run_pg_migrations(cursor, conn) -> None:
             (col,),
         )
         if cursor.fetchone() is None:
-            default_val = "''" if col in ("session_token", "public_stash_token") else "'free'"
-            cursor.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}")
+            default_val = (
+                "''" if col in ("session_token", "public_stash_token") else "'free'"
+            )
+            cursor.execute(
+                f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}"
+            )
             logger.debug("Migration: added %s column to companies table.", col)
     conn.commit()
 
@@ -422,7 +435,10 @@ def get_or_create_company_by_discord(
         trial_end = None
         if _settings.TRIAL_DAYS > 0:
             from datetime import timedelta
-            trial_end = (datetime.now(timezone.utc) + timedelta(days=_settings.TRIAL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
+            trial_end = (
+                datetime.now(timezone.utc) + timedelta(days=_settings.TRIAL_DAYS)
+            ).strftime("%Y-%m-%d %H:%M:%S")
 
         if _USE_POSTGRES:
             cursor.execute(
@@ -430,7 +446,16 @@ def get_or_create_company_by_discord(
                                           company_name, access_expires_at, is_active, trial_used,
                                           created_at, updated_at)
                    VALUES (%s, %s, %s, %s, %s, %s, 1, 1, %s, %s)""",
-                (discord_id, discord_username, discord_avatar, hashed_api_key, "", trial_end, now, now),
+                (
+                    discord_id,
+                    discord_username,
+                    discord_avatar,
+                    hashed_api_key,
+                    "",
+                    trial_end,
+                    now,
+                    now,
+                ),
             )
         else:
             cursor.execute(
@@ -438,7 +463,16 @@ def get_or_create_company_by_discord(
                                           company_name, access_expires_at, is_active, trial_used,
                                           created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)""",
-                (discord_id, discord_username, discord_avatar, hashed_api_key, "", trial_end, now, now),
+                (
+                    discord_id,
+                    discord_username,
+                    discord_avatar,
+                    hashed_api_key,
+                    "",
+                    trial_end,
+                    now,
+                    now,
+                ),
             )
         conn.commit()
 
@@ -449,7 +483,9 @@ def get_or_create_company_by_discord(
         )
         company = _fetchone_as_dict(cursor)
         company["api_key"] = raw_api_key  # return the raw key, not the hash
-        logger.info("New company created via Discord: %s (%s)", discord_username, discord_id)
+        logger.info(
+            "New company created via Discord: %s (%s)", discord_username, discord_id
+        )
         return company
 
     except Exception:
@@ -519,7 +555,10 @@ def update_company_access(company_id: int, days: int) -> bool:
     ph = _ph()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     from datetime import timedelta
-    new_expiry = (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=days)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -529,7 +568,9 @@ def update_company_access(company_id: int, days: int) -> bool:
         )
         conn.commit()
         conn.close()
-        logger.info("Company %d access extended by %d days to %s", company_id, days, new_expiry)
+        logger.info(
+            "Company %d access extended by %d days to %s", company_id, days, new_expiry
+        )
         return True
     except Exception:
         logger.exception("Failed to update company access")
@@ -694,6 +735,7 @@ def generate_public_stash_token(company_id: int) -> Optional[str]:
 # Price cache operations (shared across all companies)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def load_cache() -> dict:
     """Load cached prices from database, returning an empty dict on failure."""
     try:
@@ -745,6 +787,7 @@ def save_cache(cache_data: dict) -> None:
 # Deal logging
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def log_deal(
     iron_ingots: float,
     gold_ingots: float,
@@ -771,9 +814,20 @@ def log_deal(
         cursor = conn.cursor()
         cursor.execute(
             sql,
-            (company_id, date_str, iron_ingots, gold_ingots, diamonds,
-             iron_price, gold_price, diamond_price,
-             market_value, offered_val, status, profit),
+            (
+                company_id,
+                date_str,
+                iron_ingots,
+                gold_ingots,
+                diamonds,
+                iron_price,
+                gold_price,
+                diamond_price,
+                market_value,
+                offered_val,
+                status,
+                profit,
+            ),
         )
         conn.commit()
         conn.close()
@@ -782,7 +836,9 @@ def log_deal(
         logger.exception("Failed to log deal to database")
 
 
-def update_deal(deal_id: int, status: str, offered_price: float, company_id: int = 1) -> bool:
+def update_deal(
+    deal_id: int, status: str, offered_price: float, company_id: int = 1
+) -> bool:
     """Update a deal's status and/or offered price. Scoped by company_id."""
     ph = _ph()
     sql = f"""UPDATE deals SET status = {ph}, offered_price = {ph},
@@ -823,6 +879,7 @@ def delete_deal(deal_id: int, company_id: int = 1) -> bool:
 # Deal Templates
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def save_template(
     name: str,
     iron_ingots: float,
@@ -848,7 +905,10 @@ def save_template(
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(sql, (name, company_id, iron_ingots, gold_ingots, diamond_items, offered_price))
+        cursor.execute(
+            sql,
+            (name, company_id, iron_ingots, gold_ingots, diamond_items, offered_price),
+        )
         conn.commit()
         conn.close()
         logger.info("Template '%s' saved.", name)
@@ -899,6 +959,7 @@ def delete_template(name: str, company_id: int = 1) -> bool:
 # Price History
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def save_price_snapshot(
     iron_price: float,
     gold_price: float,
@@ -947,6 +1008,7 @@ def get_price_history(days: int = 30, company_id: int = 1) -> list:
 # ═══════════════════════════════════════════════════════════════════════════
 # History queries
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def get_all_deals(limit: int = 100, company_id: int = 1) -> list:
     """Return the most recent deals for a company. Use company_id=0 for admin (all)."""
@@ -1004,20 +1066,29 @@ def get_deal_stats(company_id: int = 1) -> dict:
         row = _fetchone_as_dict(cursor)
         conn.close()
         return row or {
-            "total_deals": 0, "accepted": 0, "rejected": 0,
-            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
+            "total_deals": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "total_profit": 0,
+            "avg_profit": 0,
+            "total_market_value": 0,
         }
     except Exception:
         logger.exception("Failed to fetch deal stats")
         return {
-            "total_deals": 0, "accepted": 0, "rejected": 0,
-            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
+            "total_deals": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "total_profit": 0,
+            "avg_profit": 0,
+            "total_market_value": 0,
         }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Item Lookup Deal logging
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def log_item_deal(
     item_name: str,
@@ -1039,11 +1110,23 @@ def log_item_deal(
             f"""INSERT INTO item_lookup_deals
                (company_id, timestamp, item_name, quantity, unit_price, total_value, offered_price, status, profit)
                VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})""",
-            (company_id, date_str, item_name, quantity, unit_price, total_value, offered_price, status, profit),
+            (
+                company_id,
+                date_str,
+                item_name,
+                quantity,
+                unit_price,
+                total_value,
+                offered_price,
+                status,
+                profit,
+            ),
         )
         conn.commit()
         conn.close()
-        logger.info("Item lookup deal logged: %s | %s | %s", item_name, status, date_str)
+        logger.info(
+            "Item lookup deal logged: %s | %s | %s", item_name, status, date_str
+        )
     except Exception:
         logger.exception("Failed to log item lookup deal")
 
@@ -1104,14 +1187,22 @@ def get_item_lookup_stats(company_id: int = 1) -> dict:
         row = _fetchone_as_dict(cursor)
         conn.close()
         return row or {
-            "total_deals": 0, "accepted": 0, "rejected": 0,
-            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
+            "total_deals": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "total_profit": 0,
+            "avg_profit": 0,
+            "total_market_value": 0,
         }
     except Exception:
         logger.exception("Failed to fetch item lookup stats")
         return {
-            "total_deals": 0, "accepted": 0, "rejected": 0,
-            "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
+            "total_deals": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "total_profit": 0,
+            "avg_profit": 0,
+            "total_market_value": 0,
         }
 
 
@@ -1262,7 +1353,9 @@ def clear_stash(company_id: int = 1) -> None:
     save_stash(stash, company_id=company_id)
 
 
-def import_items_to_stash(raw_text: str, company_id: int = 1) -> tuple[dict, list[str], list[str]]:
+def import_items_to_stash(
+    raw_text: str, company_id: int = 1
+) -> tuple[dict, list[str], list[str]]:
     """
     Parse a raw item dump (e.g. pasted from the game) and replace the entire stash
     with the recognised materials for a given company.
@@ -1284,8 +1377,8 @@ def import_items_to_stash(raw_text: str, company_id: int = 1) -> tuple[dict, lis
         if not line or ":" not in line:
             continue
 
-        clean = re.sub(r'^\[.*?\]\s*\[.*?\]\s*:\s*\[CHAT\]\s*', '', line)
-        clean = re.sub(r'^\[.*?\]\s*', '', clean)
+        clean = re.sub(r"^\[.*?\]\s*\[.*?\]\s*:\s*\[CHAT\]\s*", "", line)
+        clean = re.sub(r"^\[.*?\]\s*", "", clean)
 
         if ":" not in clean:
             skipped_lines.append(line)
@@ -1372,16 +1465,22 @@ def subtract_from_stash(
         return new_blocks, new_ingots, blocks_to_use, ingots_to_use
 
     new_ir_b, new_ir_i, ir_b_used, ir_i_used = _subtract_material(
-        stash["iron_blocks"], stash["iron_ingots"],
-        int(iron_ingots), _settings.INGOTS_PER_BLOCK,
+        stash["iron_blocks"],
+        stash["iron_ingots"],
+        int(iron_ingots),
+        _settings.INGOTS_PER_BLOCK,
     )
     new_go_b, new_go_i, go_b_used, go_i_used = _subtract_material(
-        stash["gold_blocks"], stash["gold_ingots"],
-        int(gold_ingots), _settings.INGOTS_PER_BLOCK,
+        stash["gold_blocks"],
+        stash["gold_ingots"],
+        int(gold_ingots),
+        _settings.INGOTS_PER_BLOCK,
     )
     new_di_b, new_di_i, di_b_used, di_i_used = _subtract_material(
-        stash["diamond_blocks"], stash["diamond_items"],
-        int(diamond_items), _settings.INGOTS_PER_BLOCK,
+        stash["diamond_blocks"],
+        stash["diamond_items"],
+        int(diamond_items),
+        _settings.INGOTS_PER_BLOCK,
     )
 
     stash["iron_blocks"] = new_ir_b

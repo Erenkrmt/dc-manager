@@ -10,7 +10,9 @@ import logging
 from contextlib import asynccontextmanager
 
 # Ensure the project root is on sys.path so src.* imports resolve
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse
@@ -43,6 +45,7 @@ app = FastAPI(
 # Auth middleware — extract company_id from X-API-Key header
 # ---------------------------------------------------------------------------
 
+
 def get_api_key(request: Request) -> str:
     """Extract API key from request headers."""
     api_key = request.headers.get("X-API-Key", "")
@@ -65,7 +68,9 @@ def _check_write_access(company: dict) -> None:
     if not is_active:
         raise HTTPException(status_code=403, detail="Company account is inactive")
     if is_read_only:
-        raise HTTPException(status_code=403, detail="Access expired. Contact Fishy Business to renew.")
+        raise HTTPException(
+            status_code=403, detail="Access expired. Contact Fishy Business to renew."
+        )
 
 
 def _get_company_id(request: Request) -> int:
@@ -99,6 +104,7 @@ app.add_middleware(
 # Auth & Company management endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.get("/auth/me")
 def auth_me(api_key: str = Depends(get_api_key)) -> dict:
     """Return the current company info based on API key."""
@@ -121,7 +127,9 @@ def register_company(
     discord_avatar: str = "",
 ) -> dict:
     """Register a new company via Discord OAuth data. Returns company info."""
-    company = db.get_or_create_company_by_discord(discord_id, discord_username, discord_avatar)
+    company = db.get_or_create_company_by_discord(
+        discord_id, discord_username, discord_avatar
+    )
     return {
         "id": company["id"],
         "company_name": company.get("company_name", ""),
@@ -143,6 +151,7 @@ def update_company_name(name: str, api_key: str = Depends(get_api_key)) -> dict:
 # Admin endpoints (for authorized Discord admins)
 # ---------------------------------------------------------------------------
 
+
 @app.get("/admin/companies")
 def admin_list_companies(api_key: str = Depends(get_api_key)) -> list:
     """List all companies (admin only). Authenticated admin Discord IDs only."""
@@ -151,7 +160,9 @@ def admin_list_companies(api_key: str = Depends(get_api_key)) -> list:
 
 
 @app.post("/admin/companies/{company_id}/extend")
-def admin_extend_access(company_id: int, days: int, api_key: str = Depends(get_api_key)) -> dict:
+def admin_extend_access(
+    company_id: int, days: int, api_key: str = Depends(get_api_key)
+) -> dict:
     """Extend a company's access by N days. Admin only."""
     _require_admin(api_key)
     if db.update_company_access(company_id, days):
@@ -160,7 +171,9 @@ def admin_extend_access(company_id: int, days: int, api_key: str = Depends(get_a
 
 
 @app.post("/admin/companies/{company_id}/deactivate")
-def admin_deactivate_company(company_id: int, api_key: str = Depends(get_api_key)) -> dict:
+def admin_deactivate_company(
+    company_id: int, api_key: str = Depends(get_api_key)
+) -> dict:
     """Deactivate a company. Admin only."""
     _require_admin(api_key)
     if db.deactivate_company(company_id):
@@ -172,15 +185,21 @@ def admin_deactivate_company(company_id: int, api_key: str = Depends(get_api_key
 # Stash endpoints (scoped by API key)
 # ---------------------------------------------------------------------------
 
+
 @app.get("/stash")
 def get_stash(api_key: str = Depends(get_api_key)) -> dict:
     """Return the current stash as JSON for the authenticated company."""
     company = _resolve_company(api_key)
     stash = db.load_stash(company_id=company["id"])
     stash["total_ingots"] = {
-        "iron": (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)) * _settings.INGOTS_PER_BLOCK + stash.get("iron_ingots", 0),
-        "gold": (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)) * _settings.INGOTS_PER_BLOCK + stash.get("gold_ingots", 0),
-        "diamond": stash.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK + stash.get("diamond_items", 0),
+        "iron": (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0))
+        * _settings.INGOTS_PER_BLOCK
+        + stash.get("iron_ingots", 0),
+        "gold": (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0))
+        * _settings.INGOTS_PER_BLOCK
+        + stash.get("gold_ingots", 0),
+        "diamond": stash.get("diamond_blocks", 0) * _settings.INGOTS_PER_BLOCK
+        + stash.get("diamond_items", 0),
     }
     stash.setdefault("raw_iron_blocks", 0)
     stash.setdefault("raw_gold_blocks", 0)
@@ -232,7 +251,15 @@ def add_to_stash(
     """Add materials to the stash."""
     company = _resolve_company(api_key)
     _check_write_access(company)
-    return db.add_to_stash(iron_blocks, iron_ingots, gold_blocks, gold_ingots, diamond_blocks, diamond_items, company_id=company["id"])
+    return db.add_to_stash(
+        iron_blocks,
+        iron_ingots,
+        gold_blocks,
+        gold_ingots,
+        diamond_blocks,
+        diamond_items,
+        company_id=company["id"],
+    )
 
 
 @app.post("/stash/clear")
@@ -247,6 +274,7 @@ def clear_stash(api_key: str = Depends(get_api_key)) -> dict:
 # ---------------------------------------------------------------------------
 # Prices endpoint (shared)
 # ---------------------------------------------------------------------------
+
 
 @app.get("/prices")
 def get_prices() -> dict:
@@ -266,9 +294,15 @@ def get_prices() -> dict:
             "Diamond Block": p_diamond * _settings.INGOTS_PER_BLOCK,
         },
         "per_stack_of_blocks": {
-            "Iron Block": p_iron * _settings.INGOTS_PER_BLOCK * _settings.ITEMS_PER_STACK,
-            "Gold Block": p_gold * _settings.INGOTS_PER_BLOCK * _settings.ITEMS_PER_STACK,
-            "Diamond Block": p_diamond * _settings.INGOTS_PER_BLOCK * _settings.ITEMS_PER_STACK,
+            "Iron Block": p_iron
+            * _settings.INGOTS_PER_BLOCK
+            * _settings.ITEMS_PER_STACK,
+            "Gold Block": p_gold
+            * _settings.INGOTS_PER_BLOCK
+            * _settings.ITEMS_PER_STACK,
+            "Diamond Block": p_diamond
+            * _settings.INGOTS_PER_BLOCK
+            * _settings.ITEMS_PER_STACK,
         },
     }
 
@@ -276,6 +310,7 @@ def get_prices() -> dict:
 # ---------------------------------------------------------------------------
 # Deals endpoints (scoped)
 # ---------------------------------------------------------------------------
+
 
 @app.get("/deals")
 def get_deals(limit: int = 100, api_key: str = Depends(get_api_key)) -> list:
@@ -432,7 +467,9 @@ def get_stash_public_by_token(token: str) -> str:
     """
     company = db.get_company_by_public_token(token)
     if not company:
-        raise HTTPException(status_code=404, detail="Invalid or inactive public stash token")
+        raise HTTPException(
+            status_code=404, detail="Invalid or inactive public stash token"
+        )
     return _render_public_stash_page(company)
 
 
@@ -464,6 +501,7 @@ def generate_public_token(api_key: str = Depends(get_api_key)) -> dict:
 # Health check (no auth)
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health")
 def health_check() -> dict:
     """Simple health check endpoint."""
@@ -477,7 +515,9 @@ def health_check() -> dict:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def run() -> None:
     """Run the API server with uvicorn."""
     import uvicorn
+
     uvicorn.run("src.web.api:app", host="0.0.0.0", port=8000, reload=True)  # nosec - S8392: required for Docker container access; container network namespace provides isolation.

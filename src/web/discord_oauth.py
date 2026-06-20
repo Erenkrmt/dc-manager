@@ -38,7 +38,9 @@ async def exchange_code(code: str) -> dict | None:
     Returns the token data dict, or None on failure.
     """
     if not _settings.DISCORD_CLIENT_ID or not _settings.DISCORD_CLIENT_SECRET:
-        logger.error("Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)")
+        logger.error(
+            "Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)"
+        )
         return None
 
     data = {
@@ -59,7 +61,9 @@ async def exchange_code(code: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error("Discord token exchange failed: %s %s", resp.status_code, resp.text)
+                logger.error(
+                    "Discord token exchange failed: %s %s", resp.status_code, resp.text
+                )
                 return None
             return resp.json()
     except Exception as exc:
@@ -81,7 +85,9 @@ async def get_user_info(access_token: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error("Discord user info fetch failed: %s %s", resp.status_code, resp.text)
+                logger.error(
+                    "Discord user info fetch failed: %s %s", resp.status_code, resp.text
+                )
                 return None
             return resp.json()
     except Exception as exc:
@@ -91,13 +97,16 @@ async def get_user_info(access_token: str) -> dict | None:
 
 # ── Synchronous helpers (for Streamlit which has a running event loop) ──────
 
+
 def exchange_code_sync(code: str) -> dict | None:
     """
     Synchronous version of exchange_code — uses httpx.Client instead of AsyncClient.
     Safe to call from Streamlit's event loop context.
     """
     if not _settings.DISCORD_CLIENT_ID or not _settings.DISCORD_CLIENT_SECRET:
-        logger.error("Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)")
+        logger.error(
+            "Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)"
+        )
         return None
 
     data = {
@@ -118,7 +127,11 @@ def exchange_code_sync(code: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error("Discord token exchange (sync) failed: %s %s", resp.status_code, resp.text)
+                logger.error(
+                    "Discord token exchange (sync) failed: %s %s",
+                    resp.status_code,
+                    resp.text,
+                )
                 return None
             return resp.json()
     except Exception as exc:
@@ -140,7 +153,11 @@ def get_user_info_sync(access_token: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error("Discord user info fetch (sync) failed: %s %s", resp.status_code, resp.text)
+                logger.error(
+                    "Discord user info fetch (sync) failed: %s %s",
+                    resp.status_code,
+                    resp.text,
+                )
                 return None
             return resp.json()
     except Exception as exc:

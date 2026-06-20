@@ -37,8 +37,7 @@ def get_api_key() -> str:
     api_key = os.getenv("DC_API_KEY")
     if not api_key:
         logger.error(
-            "❌ NO API KEY FOUND! "
-            "Please set 'DC_API_KEY=your_key' in your .env file."
+            "❌ NO API KEY FOUND! Please set 'DC_API_KEY=your_key' in your .env file."
         )
         sys.exit(1)
     return api_key
@@ -91,8 +90,7 @@ def analyze_deal(
         status = "ACCEPTED (BULK)"
         status_emoji = "🟨"
         status_msg = (
-            f"OK! Within bulk discount range "
-            f"(discount: {abs(profit_loss):.2f}$)"
+            f"OK! Within bulk discount range (discount: {abs(profit_loss):.2f}$)"
         )
     else:
         status = "REJECTED"
@@ -129,7 +127,9 @@ def analyze_deal(
 
         if total_metals > 0 and remaining_budget > 0:
             ratio = iron_ingots / total_metals
-            fair_metals = remaining_budget / ((ratio * price_iron) + ((1 - ratio) * price_gold))
+            fair_metals = remaining_budget / (
+                (ratio * price_iron) + ((1 - ratio) * price_gold)
+            )
             result["counter_offer"] = {
                 "iron": fair_metals * ratio if iron_ingots > 0 else 0,
                 "gold": fair_metals * (1 - ratio) if gold_ingots > 0 else 0,
@@ -147,18 +147,13 @@ def stash_ingot_equivalents(stash: dict) -> tuple[int, int, int]:
     Returns (total_iron_ingots, total_gold_ingots, total_diamond_items).
     """
     total_iron = (
-        (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0))
-        * INGOTS_PER_BLOCK
-        + stash.get("iron_ingots", 0)
-    )
+        stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)
+    ) * INGOTS_PER_BLOCK + stash.get("iron_ingots", 0)
     total_gold = (
-        (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0))
-        * INGOTS_PER_BLOCK
-        + stash.get("gold_ingots", 0)
-    )
-    total_diamond = (
-        stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK
-        + stash.get("diamond_items", 0)
+        stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)
+    ) * INGOTS_PER_BLOCK + stash.get("gold_ingots", 0)
+    total_diamond = stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK + stash.get(
+        "diamond_items", 0
     )
     return total_iron, total_gold, total_diamond
 
@@ -167,11 +162,17 @@ def format_subtract_result(result: dict) -> str:
     """Format a stash subtraction result dict into a human-readable string."""
     parts = []
     if result.get("iron_blocks") or result.get("iron_ingots"):
-        parts.append(f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots")
+        parts.append(
+            f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots"
+        )
     if result.get("gold_blocks") or result.get("gold_ingots"):
-        parts.append(f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots")
+        parts.append(
+            f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots"
+        )
     if result.get("diamond_blocks") or result.get("diamond_items"):
-        parts.append(f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items")
+        parts.append(
+            f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items"
+        )
     return ", ".join(parts)
 
 
@@ -314,13 +315,17 @@ class MarketDeal:
 
                 logger.warning(
                     "API attempt %d/%d – Status %s",
-                    attempt, API_RETRIES, response.status_code,
+                    attempt,
+                    API_RETRIES,
+                    response.status_code,
                 )
 
             except requests.RequestException as exc:
                 logger.warning(
                     "API attempt %d/%d – Error: %s",
-                    attempt, API_RETRIES, exc,
+                    attempt,
+                    API_RETRIES,
+                    exc,
                 )
 
             # Wait before retrying (skip on the last attempt)
@@ -386,8 +391,18 @@ class MarketDeal:
         company_id: int = 1,
     ) -> None:
         """Log a deal to the SQLite database."""
-        db.log_deal(iron, gold, diamonds, market_value, offered_val, status,
-                    iron_price, gold_price, diamond_price, company_id=company_id)
+        db.log_deal(
+            iron,
+            gold,
+            diamonds,
+            market_value,
+            offered_val,
+            status,
+            iron_price,
+            gold_price,
+            diamond_price,
+            company_id=company_id,
+        )
 
     # ------------------------------------------------------------------
     # Item lookup (any item via API)
@@ -470,13 +485,17 @@ class MarketDeal:
 
                 logger.warning(
                     "API attempt %d/%d – Status %s",
-                    attempt, API_RETRIES, response.status_code,
+                    attempt,
+                    API_RETRIES,
+                    response.status_code,
                 )
 
             except requests.RequestException as exc:
                 logger.warning(
                     "API attempt %d/%d – Error: %s",
-                    attempt, API_RETRIES, exc,
+                    attempt,
+                    API_RETRIES,
+                    exc,
                 )
 
             if attempt < API_RETRIES:

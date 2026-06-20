@@ -16,6 +16,7 @@ from src.core import settings
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _create_company() -> tuple:
     """Create a test company and return (company_dict, api_key)."""
     company = db.get_or_create_company_by_discord("test_discord_id", "TestUser", "")
@@ -27,6 +28,7 @@ def _create_company() -> tuple:
 # ---------------------------------------------------------------------------
 # Fixture: temp DB
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def _temp_db(monkeypatch):
@@ -43,6 +45,7 @@ def _temp_db(monkeypatch):
 # Fixture: TestClient + FastAPI app
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def client():
     """Create a Starlette TestClient for the FastAPI app."""
@@ -55,6 +58,7 @@ def client():
 # ---------------------------------------------------------------------------
 # Tests: Auth / Company endpoints
 # ---------------------------------------------------------------------------
+
 
 class TestAuthEndpoints:
     """Test auth and company management endpoints."""
@@ -92,7 +96,9 @@ class TestAuthEndpoints:
     def test_update_company_name(self, client):
         """PUT /auth/name should update the display name."""
         _, api_key = _create_company()
-        r = client.put("/auth/name", params={"name": "My Corp"}, headers={"X-API-Key": api_key})
+        r = client.put(
+            "/auth/name", params={"name": "My Corp"}, headers={"X-API-Key": api_key}
+        )
         assert r.status_code == 200
         data = r.json()
         assert data["company_name"] == "My Corp"
@@ -101,6 +107,7 @@ class TestAuthEndpoints:
 # ---------------------------------------------------------------------------
 # Tests: /stash endpoints
 # ---------------------------------------------------------------------------
+
 
 class TestStashEndpoint:
     """Test the /stash GET endpoint."""
@@ -119,14 +126,17 @@ class TestStashEndpoint:
         """After saving some stash, /stash should reflect the values."""
         _, api_key = _create_company()
         company = db.get_company_by_api_key(api_key)
-        db.save_stash({
-            "iron_blocks": 10,
-            "iron_ingots": 5,
-            "gold_blocks": 3,
-            "gold_ingots": 2,
-            "diamond_blocks": 1,
-            "diamond_items": 7,
-        }, company_id=company["id"])
+        db.save_stash(
+            {
+                "iron_blocks": 10,
+                "iron_ingots": 5,
+                "gold_blocks": 3,
+                "gold_ingots": 2,
+                "diamond_blocks": 1,
+                "diamond_items": 7,
+            },
+            company_id=company["id"],
+        )
         r = client.get("/stash", headers={"X-API-Key": api_key})
         assert r.status_code == 200
         data = r.json()
@@ -155,7 +165,11 @@ class TestStashEndpoint:
         """PUT /stash/auto_subtract should toggle the setting."""
         _, api_key = _create_company()
         db.set_auto_subtract(False)
-        r = client.put("/stash/auto_subtract", params={"enabled": True}, headers={"X-API-Key": api_key})
+        r = client.put(
+            "/stash/auto_subtract",
+            params={"enabled": True},
+            headers={"X-API-Key": api_key},
+        )
         assert r.status_code == 200
         assert r.json()["auto_subtract"] is True
 
@@ -163,6 +177,7 @@ class TestStashEndpoint:
 # ---------------------------------------------------------------------------
 # Tests: /health endpoint
 # ---------------------------------------------------------------------------
+
 
 class TestHealthEndpoint:
     """Test the /health GET endpoint."""
@@ -183,6 +198,7 @@ class TestHealthEndpoint:
 # ---------------------------------------------------------------------------
 # Tests: /deals endpoints
 # ---------------------------------------------------------------------------
+
 
 class TestDealsEndpoint:
     """Test the /deals GET endpoints."""
@@ -207,6 +223,7 @@ class TestDealsEndpoint:
 # Tests: /prices endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestPricesEndpoint:
     """Test the /prices GET endpoint."""
 
@@ -225,13 +242,16 @@ class TestPricesEndpoint:
 # Tests: Stash save/clear via API
 # ---------------------------------------------------------------------------
 
+
 class TestStashMutations:
     """Test stash write operations via the API."""
 
     def test_save_stash_via_api(self, client):
         """PUT /stash should save stash."""
         _, api_key = _create_company()
-        r = client.put("/stash", json={"iron_blocks": 42}, headers={"X-API-Key": api_key})
+        r = client.put(
+            "/stash", json={"iron_blocks": 42}, headers={"X-API-Key": api_key}
+        )
         assert r.status_code == 200
         data = r.json()
         assert data["iron_blocks"] == 42
@@ -239,7 +259,11 @@ class TestStashMutations:
     def test_add_to_stash_via_api(self, client):
         """PUT /stash/add should add materials."""
         _, api_key = _create_company()
-        r = client.put("/stash/add", params={"iron_blocks": 10, "gold_ingots": 5}, headers={"X-API-Key": api_key})
+        r = client.put(
+            "/stash/add",
+            params={"iron_blocks": 10, "gold_ingots": 5},
+            headers={"X-API-Key": api_key},
+        )
         assert r.status_code == 200
         data = r.json()
         assert data["iron_blocks"] == 10
