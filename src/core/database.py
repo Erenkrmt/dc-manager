@@ -9,7 +9,7 @@ import os
 import logging
 import secrets
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Union, Any
 
 from src.core.settings import get_settings
@@ -64,20 +64,13 @@ def get_connection():
 
 def _fetchone_as_dict(cursor) -> Optional[dict]:
     """Fetch one row and return as a dict (works with both backends)."""
-    if _USE_POSTGRES:
-        row = cursor.fetchone()
-        return dict(row) if row else None
-    else:
-        row = cursor.fetchone()
-        return dict(row) if row else None
+    row = cursor.fetchone()
+    return dict(row) if row else None
 
 
 def _fetchall_as_dicts(cursor) -> list[dict]:
     """Fetch all rows and return as a list of dicts."""
-    if _USE_POSTGRES:
-        return [dict(row) for row in cursor.fetchall()]
-    else:
-        return [dict(row) for row in cursor.fetchall()]
+    return [dict(row) for row in cursor.fetchall()]
 
 
 def _ph() -> str:
@@ -392,7 +385,7 @@ def get_or_create_company_by_discord(
     Returns the company dict.
     """
     ph = _ph()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -428,7 +421,7 @@ def get_or_create_company_by_discord(
         trial_end = None
         if _settings.TRIAL_DAYS > 0:
             from datetime import timedelta
-            trial_end = (datetime.utcnow() + timedelta(days=_settings.TRIAL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+            trial_end = (datetime.now(timezone.utc) + timedelta(days=_settings.TRIAL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
         if _USE_POSTGRES:
             cursor.execute(
@@ -523,9 +516,9 @@ def update_company_access(company_id: int, days: int) -> bool:
     Returns True on success.
     """
     ph = _ph()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     from datetime import timedelta
-    new_expiry = (datetime.utcnow() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -545,7 +538,7 @@ def update_company_access(company_id: int, days: int) -> bool:
 def update_company_name(company_id: int, name: str) -> bool:
     """Update a company's display name."""
     ph = _ph()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -564,7 +557,7 @@ def update_company_name(company_id: int, name: str) -> bool:
 def regenerate_api_key(company_id: int) -> Optional[str]:
     """Generate a new API key for a company. Returns the new key. Stores only the hash in DB."""
     ph = _ph()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     raw_key = _generate_api_key()
     hashed_key = _hash_api_key(raw_key)
     try:
@@ -586,7 +579,7 @@ def regenerate_api_key(company_id: int) -> Optional[str]:
 def deactivate_company(company_id: int) -> bool:
     """Mark a company as inactive."""
     ph = _ph()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -620,7 +613,9 @@ def check_company_access(company_id: int) -> tuple[bool, bool]:
 
     try:
         expiry = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
-        if datetime.utcnow() > expiry:
+        # Use naive UTC datetime for comparison since stored dates are naive
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        if now_utc > expiry:
             return True, True  # active but expired = read-only
         return True, False  # active and not expired = full access
     except (ValueError, TypeError):
@@ -638,7 +633,7 @@ def get_company_tier(company_id: int) -> str:
 def set_company_tier(company_id: int, tier: str) -> bool:
     """Set a company's tier ('free' or 'premium'). Returns True on success."""
     ph = _ph()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -668,15 +663,15 @@ def get_company_by_public_token(token: str) -> Optional[dict]:
         row = _fetchone_as_dict(cursor)
         conn.close()
         return row
-    except Exception as exc:
-        logger.error("Failed to look up company by public token: %s", exc)
+    except Exception:
+        logger.exception("Failed to look up company by public token")
         return None
 
 
 def generate_public_stash_token(company_id: int) -> Optional[str]:
     """Generate a new public stash token for a company. Returns the token string."""
     ph = _ph()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     token = f"pub_{secrets.token_hex(12)}"  # e.g. pub_abc123... (24 hex chars)
     try:
         conn = get_connection()
@@ -689,8 +684,8 @@ def generate_public_stash_token(company_id: int) -> Optional[str]:
         conn.close()
         logger.info("Public stash token generated for company %d", company_id)
         return token
-    except Exception as exc:
-        logger.error("Failed to generate public stash token: %s", exc)
+    except Exception:
+        logger.exception("Failed to generate public stash token")
         return None
 
 
@@ -741,8 +736,8 @@ def save_cache(cache_data: dict) -> None:
                 )
         conn.commit()
         conn.close()
-    except Exception as exc:
-        logger.error("Failed to save cache to DB: %s", exc)
+    except Exception:
+        logger.exception("Failed to save cache to DB")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -782,8 +777,8 @@ def log_deal(
         conn.commit()
         conn.close()
         logger.info("Deal logged to database: %s | %s", status, date_str)
-    except Exception as exc:
-        logger.error("Failed to log deal to database: %s", exc)
+    except Exception:
+        logger.exception("Failed to log deal to database")
 
 
 def update_deal(deal_id: int, status: str, offered_price: float, company_id: int = 1) -> bool:
@@ -799,8 +794,8 @@ def update_deal(deal_id: int, status: str, offered_price: float, company_id: int
         conn.close()
         logger.info("Deal %d updated: %s | $%.2f", deal_id, status, offered_price)
         return True
-    except Exception as exc:
-        logger.error("Failed to update deal %d: %s", deal_id, exc)
+    except Exception:
+        logger.exception("Failed to update deal %d", deal_id)
         return False
 
 
@@ -819,7 +814,7 @@ def delete_deal(deal_id: int, company_id: int = 1) -> bool:
         logger.info("Deal %d deleted.", deal_id)
         return True
     except Exception as exc:
-        logger.error("Failed to delete deal %d: %s", deal_id, exc)
+        logger.exception("Failed to delete deal %d", deal_id)
         return False
 
 
@@ -858,7 +853,7 @@ def save_template(
         logger.info("Template '%s' saved.", name)
         return True
     except Exception as exc:
-        logger.error("Failed to save template: %s", exc)
+        logger.exception("Failed to save template")
         return False
 
 
@@ -876,7 +871,7 @@ def load_templates(company_id: int = 1) -> list:
         conn.close()
         return rows
     except Exception as exc:
-        logger.error("Failed to load templates: %s", exc)
+        logger.exception("Failed to load templates")
         return []
 
 
@@ -895,7 +890,7 @@ def delete_template(name: str, company_id: int = 1) -> bool:
         logger.info("Template '%s' deleted.", name)
         return True
     except Exception as exc:
-        logger.error("Failed to delete template: %s", exc)
+        logger.exception("Failed to delete template")
         return False
 
 
@@ -923,7 +918,7 @@ def save_price_snapshot(
         conn.commit()
         conn.close()
     except Exception as exc:
-        logger.error("Failed to save price snapshot: %s", exc)
+        logger.exception("Failed to save price snapshot")
 
 
 def get_price_history(days: int = 30, company_id: int = 1) -> list:
@@ -944,7 +939,7 @@ def get_price_history(days: int = 30, company_id: int = 1) -> list:
         conn.close()
         return rows
     except Exception as exc:
-        logger.error("Failed to fetch price history: %s", exc)
+        logger.exception("Failed to fetch price history")
         return []
 
 
@@ -972,7 +967,7 @@ def get_all_deals(limit: int = 100, company_id: int = 1) -> list:
         conn.close()
         return rows
     except Exception as exc:
-        logger.error("Failed to fetch deals: %s", exc)
+        logger.exception("Failed to fetch deals")
         return []
 
 
@@ -986,7 +981,7 @@ def get_deal_stats(company_id: int = 1) -> dict:
             cursor.execute("""
                 SELECT
                     COUNT(*) AS total_deals,
-                    COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%%' THEN 1 ELSE 0 END), 0) AS accepted,
+                    COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%' THEN 1 ELSE 0 END), 0) AS accepted,
                     COALESCE(SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END), 0) AS rejected,
                     COALESCE(SUM(profit), 0) AS total_profit,
                     COALESCE(AVG(profit), 0) AS avg_profit,
@@ -997,7 +992,7 @@ def get_deal_stats(company_id: int = 1) -> dict:
             cursor.execute(
                 f"""SELECT
                         COUNT(*) AS total_deals,
-                        COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%%' THEN 1 ELSE 0 END), 0) AS accepted,
+                        COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%' THEN 1 ELSE 0 END), 0) AS accepted,
                         COALESCE(SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END), 0) AS rejected,
                         COALESCE(SUM(profit), 0) AS total_profit,
                         COALESCE(AVG(profit), 0) AS avg_profit,
@@ -1012,7 +1007,7 @@ def get_deal_stats(company_id: int = 1) -> dict:
             "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
         }
     except Exception as exc:
-        logger.error("Failed to fetch deal stats: %s", exc)
+        logger.exception("Failed to fetch deal stats")
         return {
             "total_deals": 0, "accepted": 0, "rejected": 0,
             "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
@@ -1049,7 +1044,7 @@ def log_item_deal(
         conn.close()
         logger.info("Item lookup deal logged: %s | %s | %s", item_name, status, date_str)
     except Exception as exc:
-        logger.error("Failed to log item lookup deal: %s", exc)
+        logger.exception("Failed to log item lookup deal")
 
 
 def get_item_lookup_deals(limit: int = 100, company_id: int = 1) -> list:
@@ -1072,7 +1067,7 @@ def get_item_lookup_deals(limit: int = 100, company_id: int = 1) -> list:
         conn.close()
         return rows
     except Exception as exc:
-        logger.error("Failed to fetch item lookup deals: %s", exc)
+        logger.exception("Failed to fetch item lookup deals")
         return []
 
 
@@ -1086,7 +1081,7 @@ def get_item_lookup_stats(company_id: int = 1) -> dict:
             cursor.execute("""
                 SELECT
                     COUNT(*) AS total_deals,
-                    COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%%' THEN 1 ELSE 0 END), 0) AS accepted,
+                    COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%' THEN 1 ELSE 0 END), 0) AS accepted,
                     COALESCE(SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END), 0) AS rejected,
                     COALESCE(SUM(profit), 0) AS total_profit,
                     COALESCE(AVG(profit), 0) AS avg_profit,
@@ -1097,7 +1092,7 @@ def get_item_lookup_stats(company_id: int = 1) -> dict:
             cursor.execute(
                 f"""SELECT
                         COUNT(*) AS total_deals,
-                        COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%%' THEN 1 ELSE 0 END), 0) AS accepted,
+                        COALESCE(SUM(CASE WHEN status LIKE 'ACCEPTED%' THEN 1 ELSE 0 END), 0) AS accepted,
                         COALESCE(SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END), 0) AS rejected,
                         COALESCE(SUM(profit), 0) AS total_profit,
                         COALESCE(AVG(profit), 0) AS avg_profit,
@@ -1112,7 +1107,7 @@ def get_item_lookup_stats(company_id: int = 1) -> dict:
             "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
         }
     except Exception as exc:
-        logger.error("Failed to fetch item lookup stats: %s", exc)
+        logger.exception("Failed to fetch item lookup stats")
         return {
             "total_deals": 0, "accepted": 0, "rejected": 0,
             "total_profit": 0, "avg_profit": 0, "total_market_value": 0,
@@ -1134,7 +1129,7 @@ def delete_item_lookup_deal(deal_id: int, company_id: int = 1) -> bool:
         logger.info("Item lookup deal %d deleted.", deal_id)
         return True
     except Exception as exc:
-        logger.error("Failed to delete item lookup deal %d: %s", deal_id, exc)
+        logger.exception("Failed to delete item lookup deal %d", deal_id)
         return False
 
 
@@ -1235,7 +1230,7 @@ def save_stash(data: dict, company_id: int = 1) -> None:
         conn.close()
         logger.info("Stash saved for company %d.", company_id)
     except Exception as exc:
-        logger.error("Failed to save stash to database: %s", exc)
+        logger.exception("Failed to save stash to database")
 
 
 def add_to_stash(

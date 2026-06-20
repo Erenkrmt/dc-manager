@@ -29,7 +29,7 @@ def main() -> None:
 
     # Start FastAPI server
     api_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", api_port],
+        [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", api_port],  # nosec - S8392: required for Docker container access
         cwd=project_root,
     )
     logger.info("FastAPI server started on port %s (PID %d)", api_port, api_process.pid)
@@ -42,7 +42,7 @@ def main() -> None:
         [
             sys.executable, "-m", "streamlit", "run", "src/web/app.py",
             "--server.port", streamlit_port,
-            "--server.address", "0.0.0.0",
+            "--server.address", "0.0.0.0",  # nosec - S8392: required for Docker container access
             "--server.headless", "true",
             "--browser.gatherUsageStats", "false",
         ],

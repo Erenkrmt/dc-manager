@@ -8,7 +8,7 @@ Create Date: 2026-06-19 00:45:00.000000
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 revision: str = "002"
@@ -18,7 +18,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # ── 1. Create companies table ──────────────────────────────────────────
     op.create_table(

@@ -134,7 +134,7 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
         if stash and stash.get("updated_at") != "never":
             used_stash = True
             total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
-            print(f"\n📦 Loaded from stash:")
+            print("\n📦 Loaded from stash:")
             print(f"   Iron:     {MarketDeal.format_bulk_storage(total_iron)}")
             print(f"   Gold:     {MarketDeal.format_bulk_storage(total_gold)}")
             print(f"   Diamonds: {MarketDeal.format_bulk_storage(total_diamond, is_diamond=True)}")
@@ -221,7 +221,7 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
         total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
         if stash and stash.get("updated_at") != "never" and (total_iron or total_gold or total_diamond):
             used_stash = True
-            print(f"\n📦 Loaded from stash (you can override individual values):")
+            print("\n📦 Loaded from stash (you can override individual values):")
 
             # Helper: ask override for a value, keep stash if empty
             def _override_val(prompt: str, stash_val: int) -> int:

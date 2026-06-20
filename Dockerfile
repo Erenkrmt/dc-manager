@@ -43,7 +43,11 @@ RUN apt-get remove -y gcc libpq-dev && \
 # ---- Runtime stage ----
 FROM deps AS runtime
 
-COPY . .
+# Copy only required source files (not the entire context)
+# The .dockerignore prevents sensitive files from being included
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY main.py ./
 
 # Create data directory with correct permissions
 RUN mkdir -p /app/data && chmod -R 755 /app/data

@@ -14,7 +14,7 @@ import json
 import secrets
 from pathlib import Path
 from urllib.parse import urlencode, parse_qs
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Ensure the project root is on sys.path so src.* imports resolve
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -58,7 +58,7 @@ def _store_session_token(company_id: int, token: str) -> None:
         cursor = conn.cursor()
         cursor.execute(
             f"UPDATE companies SET session_token = {ph}, updated_at = {ph} WHERE id = {ph}",
-            (token, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), company_id),
+            (token, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), company_id),
         )
         conn.commit()
         conn.close()
@@ -74,7 +74,7 @@ def _clear_session_token(company_id: int) -> None:
         cursor = conn.cursor()
         cursor.execute(
             f"UPDATE companies SET session_token = {ph}, updated_at = {ph} WHERE id = {ph}",
-            ("", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), company_id),
+            ("", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), company_id),
         )
         conn.commit()
         conn.close()
@@ -518,7 +518,7 @@ def _format_subtract_result(result: dict) -> str:
     return " | ".join(parts)
 
 
-def _log_deal_with_all_fields(
+def _log_deal_with_all_fields(  # noqa: PLR0913 - many parameters needed for all deal fields
     iron_ingots: float,
     gold_ingots: float,
     diamond_items: float,
@@ -559,10 +559,10 @@ def _log_deal_with_all_fields(
         conn.close()
         logging.getLogger(__name__).info("Deal logged to database: %s | %s", status, date_str)
     except Exception as exc:
-        logging.getLogger(__name__).error("Failed to log deal: %s", exc)
+        logging.getLogger(__name__).exception("Failed to log deal")
 
 
-def _handle_deal_logging(
+def _handle_deal_logging(  # noqa: PLR0913 - many parameters needed for logging all deal details
     iron_ingots_val: float,
     gold_ingots_val: float,
     diamond_items_val: float,
@@ -1616,7 +1616,7 @@ elif page == "👤 My Profile":
             elif expires_at:
                 try:
                     expiry = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
-                    remaining = (expiry - datetime.utcnow()).days
+                    remaining = (expiry - datetime.now(timezone.utc)).days
                     if remaining < 0:
                         st.warning(f"⚠️ **Expired** — access ended on {expires_at}")
                     else:
