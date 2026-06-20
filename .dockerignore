@@ -45,5 +45,3 @@ tests/
 # Alembic migrations (not needed at runtime in Docker – DB auto-migrates)
 alembic/
 
-# Wrapper entry point (not needed, real entry is src/main.py)
-main.py
