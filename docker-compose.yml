@@ -33,6 +33,10 @@ services:
       - ADMIN_DISCORD_IDS=${ADMIN_DISCORD_IDS:-}
       - TRIAL_DAYS=${TRIAL_DAYS:-3}
       - SESSION_SECRET=${SESSION_SECRET:-}
+      # SSL / TLS — mount certs volume externally and set paths
+      - SSL_ENABLED=${SSL_ENABLED:-false}
+      - SSL_CERTFILE=${SSL_CERTFILE:-}
+      - SSL_KEYFILE=${SSL_KEYFILE:-}
       # PostgreSQL connection
       - DATABASE_URL=${DATABASE_URL:-}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}

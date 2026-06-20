@@ -27,9 +27,27 @@ def main() -> None:
     api_port = os.getenv("API_PORT", "8000")
     streamlit_port = os.getenv("STREAMLIT_PORT", "8501")
 
+    # ── SSL / TLS configuration ──────────────────────────────────────
+    ssl_enabled = os.getenv("SSL_ENABLED", "").lower() in ("1", "true", "yes")
+    ssl_certfile = os.getenv("SSL_CERTFILE", "")
+    ssl_keyfile = os.getenv("SSL_KEYFILE", "")
+
+    api_ssl_args: list[str] = []
+    streamlit_ssl_args: list[str] = []
+
+    if ssl_enabled and ssl_certfile and ssl_keyfile:
+        logger.info("SSL is ENABLED — using certfile=%s keyfile=%s", ssl_certfile, ssl_keyfile)
+        # uvicorn SSL flags
+        api_ssl_args = ["--ssl-certfile", ssl_certfile, "--ssl-keyfile", ssl_keyfile]
+        # streamlit SSL flags
+        streamlit_ssl_args = ["--server.sslCertFile", ssl_certfile, "--server.sslKeyFile", ssl_keyfile]
+    else:
+        logger.info("SSL is DISABLED — serving over plain HTTP")
+    # ─────────────────────────────────────────────────────────────────
+
     # Start FastAPI server
     api_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", api_port],  # nosec - S8392: required for Docker container access
+        [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", api_port, *api_ssl_args],  # nosec - S8392: required for Docker container access
         cwd=project_root,
     )
     logger.info("FastAPI server started on port %s (PID %d)", api_port, api_process.pid)
@@ -45,6 +63,7 @@ def main() -> None:
             "--server.address", "0.0.0.0",  # nosec - S8392: required for Docker container access
             "--server.headless", "true",
             "--browser.gatherUsageStats", "false",
+            *streamlit_ssl_args,
         ],
         cwd=project_root,
     )

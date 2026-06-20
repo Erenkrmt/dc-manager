@@ -121,6 +121,14 @@ class Settings:
     API_PORT: int = int(os.getenv("API_PORT", os.getenv("PORT", "8000")))
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
 
+    # ── SSL / TLS ────────────────────────────────────────────────────────
+    # Set SSL_ENABLED=true and point SSL_CERTFILE / SSL_KEYFILE to your
+    # certificate and private key paths (e.g. /app/certs/fullchain.pem).
+    # When disabled (the default), both servers run over plain HTTP.
+    SSL_ENABLED: bool = os.getenv("SSL_ENABLED", "").lower() in ("1", "true", "yes")
+    SSL_CERTFILE: str = os.getenv("SSL_CERTFILE", "")
+    SSL_KEYFILE: str = os.getenv("SSL_KEYFILE", "")
+
     # ── Fallback prices ──────────────────────────────────────────────────
     FALLBACK_PRICES: dict[str, float] = {
         "Iron Ingot": 1.20,

@@ -56,6 +56,14 @@ def main():
         )
         sys.exit(1)
 
+    # Normalize line endings: SOPS' Go parser chokes on Windows CRLF (\r\n).
+    # Read the encrypted file and strip all \r characters to ensure LF-only.
+    raw = encrypted_file.read_bytes()
+    if b"\r\n" in raw or b"\r" in raw:
+        normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        encrypted_file.write_bytes(normalized)
+        print("   ℹ Normalized CRLF → LF in encrypted file")
+
     # Decrypt
     env = os.environ.copy()
     env["SOPS_AGE_KEY_FILE"] = str(key_file)
