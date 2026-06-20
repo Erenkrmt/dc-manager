@@ -292,8 +292,8 @@ def init_db() -> None:
             _run_sqlite_migrations(conn)
 
         logger.info("Database initialized (%s).", "PostgreSQL" if _USE_POSTGRES else "SQLite")
-    except Exception as exc:
-        logger.error("Failed to initialize database: %s", exc)
+    except Exception:
+        logger.exception("Failed to initialize database")
         raise
     finally:
         conn.close()
@@ -458,8 +458,8 @@ def get_or_create_company_by_discord(
         logger.info("New company created via Discord: %s (%s)", discord_username, discord_id)
         return company
 
-    except Exception as exc:
-        logger.error("Failed to get/create company: %s", exc)
+    except Exception:
+        logger.exception("Failed to get/create company")
         raise
     finally:
         conn.close()
@@ -478,8 +478,8 @@ def get_company_by_api_key(api_key: str) -> Optional[dict]:
                 return dict(row)
         conn.close()
         return None
-    except Exception as exc:
-        logger.error("Failed to lookup company by API key: %s", exc)
+    except Exception:
+        logger.exception("Failed to lookup company by API key")
         return None
 
 
@@ -496,8 +496,8 @@ def get_company_by_id(company_id: int) -> Optional[dict]:
         row = _fetchone_as_dict(cursor)
         conn.close()
         return row
-    except Exception as exc:
-        logger.error("Failed to get company by ID: %s", exc)
+    except Exception:
+        logger.exception("Failed to get company by ID")
         return None
 
 
@@ -510,8 +510,8 @@ def list_all_companies() -> list[dict]:
         rows = _fetchall_as_dicts(cursor)
         conn.close()
         return rows
-    except Exception as exc:
-        logger.error("Failed to list companies: %s", exc)
+    except Exception:
+        logger.exception("Failed to list companies")
         return []
 
 
@@ -537,8 +537,8 @@ def update_company_access(company_id: int, days: int) -> bool:
         conn.close()
         logger.info("Company %d access extended by %d days to %s", company_id, days, new_expiry)
         return True
-    except Exception as exc:
-        logger.error("Failed to update company access: %s", exc)
+    except Exception:
+        logger.exception("Failed to update company access")
         return False
 
 
@@ -556,8 +556,8 @@ def update_company_name(company_id: int, name: str) -> bool:
         conn.commit()
         conn.close()
         return True
-    except Exception as exc:
-        logger.error("Failed to update company name: %s", exc)
+    except Exception:
+        logger.exception("Failed to update company name")
         return False
 
 
@@ -578,8 +578,8 @@ def regenerate_api_key(company_id: int) -> Optional[str]:
         conn.close()
         logger.info("API key regenerated for company %d", company_id)
         return raw_key
-    except Exception as exc:
-        logger.error("Failed to regenerate API key: %s", exc)
+    except Exception:
+        logger.exception("Failed to regenerate API key")
         return None
 
 
@@ -598,8 +598,8 @@ def deactivate_company(company_id: int) -> bool:
         conn.close()
         logger.info("Company %d deactivated.", company_id)
         return True
-    except Exception as exc:
-        logger.error("Failed to deactivate company: %s", exc)
+    except Exception:
+        logger.exception("Failed to deactivate company")
         return False
 
 
@@ -650,8 +650,8 @@ def set_company_tier(company_id: int, tier: str) -> bool:
         conn.close()
         logger.info("Company %d tier set to '%s'.", company_id, tier)
         return True
-    except Exception as exc:
-        logger.error("Failed to set company tier: %s", exc)
+    except Exception:
+        logger.exception("Failed to set company tier")
         return False
 
 
