@@ -78,7 +78,7 @@ make docker-up
 
 ## 🐳 Docker Deployment Guide
 
-This project uses a **pre-built image** hosted on GitHub Container Registry (`ghcr.io/erenkrmt/dc-trade`). Every push to `main` triggers a GitHub Action that builds and pushes a new image automatically.
+This project uses a **pre-built image** hosted on GitHub Container Registry (`ghcr.io/erenkrmt/dc-trade`). Every push to `master` triggers a GitHub Action that builds and pushes a new image automatically.
 
 ### Local Docker (development)
 
@@ -101,7 +101,7 @@ docker compose down
 
 ### Auto-build with GitHub Actions
 
-The CI workflow (`.github/workflows/docker-publish.yml`) runs on every push to `main`:
+The CI workflow (`.github/workflows/docker-publish.yml`) runs on every push to `master`:
 
 1. Logs into GitHub Container Registry using the automatic `GITHUB_TOKEN`
 2. Builds the Docker image
@@ -147,7 +147,7 @@ Dockge will pull `ghcr.io/erenkrmt/dc-trade:latest` and start the container.
 
 **4. Update to a new version**
 
-Push to `main` → GitHub Action builds a new image → In Dockge click **Update** on the stack → Done.
+Push to `master` → GitHub Action builds a new image → In Dockge click **Update** on the stack → Done.
 
 ### Using PostgreSQL in production
 
