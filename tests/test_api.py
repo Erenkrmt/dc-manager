@@ -36,6 +36,7 @@ def _temp_db(monkeypatch):
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
     tmp.close()
     monkeypatch.setattr(settings.Settings, "DB_FILE", tmp.name)
+    monkeypatch.setenv("DC_API_KEY", "test_dc_api_key_for_ci")
     db.init_db()
     yield
     os.unlink(tmp.name)
@@ -227,8 +228,11 @@ class TestDealsEndpoint:
 class TestPricesEndpoint:
     """Test the /prices GET endpoint."""
 
-    def test_prices_structure(self, client):
+    def test_prices_structure(self, client, monkeypatch):
         """The prices endpoint should return a prices dict with expected keys."""
+        def _mock_fetch_live_prices(*args, **kwargs):
+            return (5.0, 10.0, 20.0, {})
+        monkeypatch.setattr("src.web.api.fetch_live_prices", _mock_fetch_live_prices)
         r = client.get("/prices")
         assert r.status_code == 200
         data = r.json()
