@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.web.session import (
     _encode_token,
@@ -175,18 +175,13 @@ class TestValidateSession:
         company_id, _ = seed_company
         from src.web.session import store_session
 
-        token = store_session(company_id)
-        # Simulate expiry by making _MAX_AGE negative
+        store_session(company_id)
+        # Generate a token with negative max_age so it's immediately expired
         with patch.object(sess_module, "_MAX_AGE", -1):
-            # Need a token that's actually expired
             expired_token = generate_session_token(company_id)
-            # But the DB still has the old one — we need to overwrite
-            from src.web.session import store_session as store
 
-            store(company_id)  # This stores a new token, but with negative max_age
-            # Actually the max_age was patched so the new token is also "expired"
-            parsed = parse_session_token(expired_token)
-            assert parsed is None
+        # Token should fail parsing (expired)
+        assert parse_session_token(expired_token) is None
 
     def test_validate_nonexistent_company(self):
         assert not validate_session(9999, "some_token")
@@ -194,7 +189,6 @@ class TestValidateSession:
     def test_validate_empty_stored_token(self, seed_company):
         """validate_session should fail if DB has empty session_token."""
         company_id, _ = seed_company
-        from src.core import database as db
 
         # Clear the token
         from src.web.session import clear_session
@@ -260,7 +254,7 @@ class TestCleanup:
         from src.web.session import store_session
         from src.core import database as db
 
-        token = store_session(company_id)
+        store_session(company_id)
 
         # Set session_created_at to a very old date manually
         ph = db._ph()

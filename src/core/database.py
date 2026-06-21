@@ -717,7 +717,6 @@ def cleanup_expired_sessions(max_age_seconds: int) -> int:
     Remove (clear) session tokens that are older than `max_age_seconds` seconds.
     Returns the number of sessions cleaned up.
     """
-    ph = _ph()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = get_connection()
