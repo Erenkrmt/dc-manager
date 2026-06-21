@@ -131,14 +131,14 @@ def register_company(
     discord_avatar: str = "",
 ) -> dict:
     """Register a new company via Discord OAuth data. Returns company info."""
-    company = db.get_or_create_company_by_discord(
+    company, member = db.get_or_create_company_by_discord(
         discord_id, discord_username, discord_avatar
     )
     return {
         "id": company["id"],
         "company_name": company.get("company_name", ""),
         "api_key": company["api_key"],  # shown only once
-        "discord_username": company.get("discord_username", ""),
+        "discord_username": member.get("discord_username", discord_username),
         "access_expires_at": company.get("access_expires_at"),
     }
 
