@@ -741,7 +741,7 @@ def cleanup_expired_sessions(max_age_seconds: int) -> int:
                    SET session_token = '', session_created_at = NULL, updated_at = ?
                    WHERE session_token != ''
                      AND session_created_at IS NOT NULL
-                     AND (strftime('%%s', ?) - strftime('%%s', session_created_at)) > ?""",
+                     AND (strftime('%s', ?) - strftime('%s', session_created_at)) > ?""",
                 (now, now, max_age_seconds),
             )
         affected = cursor.rowcount
