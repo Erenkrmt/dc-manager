@@ -50,6 +50,7 @@ db.init_db()
 def _try_restore_session() -> bool:
     """
     Try to restore session from a one-time URL session token.
+    Format: ``?session=mid:cid:token``
     If valid, rotates the token. Returns True if session was restored.
     """
     session_param = st.query_params.get("session", None)
@@ -65,17 +66,20 @@ def _try_restore_session() -> bool:
 
     st.session_state.company_id = session_data["company_id"]
     st.session_state.company_name = session_data["company_name"]
+    st.session_state.member_id = session_data.get("member_id")
+    st.session_state.discord_id = session_data.get("discord_id", "")
     st.session_state.discord_username = session_data["discord_username"]
     st.session_state.discord_avatar_url = session_data["discord_avatar_url"]
+    st.session_state.member_role = session_data.get("member_role", "member")
     st.session_state.session_token = session_data["session_token"]
     st.session_state.is_admin = session_data["is_admin"]
     st.session_state.is_read_only = session_data["is_read_only"]
     st.session_state.is_active = session_data["is_active"]
 
-    # Update URL with rotated token
+    # Update URL with rotated token (new format: mid:cid:token)
     st.query_params.clear()
     st.query_params["session"] = (
-        f"{session_data['company_id']}:{session_data['session_token']}"
+        f"{session_data['member_id']}:{session_data['company_id']}:{session_data['session_token']}"
     )
     return True
 
@@ -86,10 +90,16 @@ def init_session_state() -> None:
         st.session_state.company_id = None
     if "company_name" not in st.session_state:
         st.session_state.company_name = ""
+    if "member_id" not in st.session_state:
+        st.session_state.member_id = None
+    if "discord_id" not in st.session_state:
+        st.session_state.discord_id = ""
     if "discord_username" not in st.session_state:
         st.session_state.discord_username = ""
     if "discord_avatar_url" not in st.session_state:
         st.session_state.discord_avatar_url = ""
+    if "member_role" not in st.session_state:
+        st.session_state.member_role = ""
     if "is_admin" not in st.session_state:
         st.session_state.is_admin = False
     if "is_read_only" not in st.session_state:
@@ -98,6 +108,8 @@ def init_session_state() -> None:
         st.session_state.session_token = ""
     if "is_active" not in st.session_state:
         st.session_state.is_active = False
+    if "user_companies" not in st.session_state:
+        st.session_state.user_companies = []  # List of dicts: {company_id, company_name, member_id, role}
 
     # Try to restore session from URL token (one-time, rotated on restore)
     if st.session_state.company_id is None:
@@ -116,17 +128,22 @@ def init_session_state() -> None:
 def clear_session() -> None:
     """Clear all session state (logout)."""
     # Clear the stored session token from DB so it can't be reused
-    cid = st.session_state.get("company_id")
-    if cid is not None:
-        _clear_db_session(cid)
+    mid = st.session_state.get("member_id")
+    if mid is not None:
+        _clear_db_session(mid)
     st.session_state.company_id = None
     st.session_state.company_name = ""
+    st.session_state.member_id = None
+    st.session_state.discord_id = ""
     st.session_state.discord_username = ""
     st.session_state.discord_avatar_url = ""
+    st.session_state.member_role = ""
     st.session_state.is_admin = False
     st.session_state.is_read_only = False
     st.session_state.session_token = ""
+    st.session_state.user_companies = []
     st.session_state.selected_admin_company = None
+    st.query_params.clear()
 
 
 def check_read_only() -> None:
@@ -261,42 +278,97 @@ def render_login_page() -> None:
                 discord_username = user.get("username", "Unknown")
                 discord_avatar = get_avatar_url(user)
 
-                # Get or create company
-                try:
-                    company = db.get_or_create_company_by_discord(
-                        discord_id, discord_username, discord_avatar
+                # Check if user already belongs to companies
+                user_companies = db.get_user_companies(discord_id)
+
+                if user_companies:
+                    # User has existing memberships — show company picker
+                    st.session_state.user_companies = user_companies
+                    company_options = {
+                        f"{c['company_name']} ({c['role']})": c for c in user_companies
+                    }
+                    selected_label = st.selectbox(
+                        "Select a company to log into:",
+                        list(company_options.keys()),
+                        key="company_picker",
                     )
-                except Exception as exc:
-                    st.error(f"❌ Database error: {exc}")
-                    company = None
+                    selected = company_options[selected_label]
 
-                if company:
-                    # Generate and store HMAC-signed session token
-                    session_token = store_session(company["id"])
+                    if st.button("🔑 Login to selected company", type="primary"):
+                        mid = selected["member_id"]
+                        cid = selected["company_id"]
+                        session_token = store_session(mid)
 
-                    # Set session state
-                    st.session_state.company_id = company["id"]
-                    st.session_state.company_name = company.get("company_name", "")
-                    st.session_state.discord_username = discord_username
-                    st.session_state.discord_avatar_url = discord_avatar
-                    st.session_state.session_token = session_token
+                        st.session_state.company_id = cid
+                        st.session_state.company_name = selected["company_name"]
+                        st.session_state.member_id = mid
+                        st.session_state.discord_id = discord_id
+                        st.session_state.discord_username = discord_username
+                        st.session_state.discord_avatar_url = discord_avatar
+                        st.session_state.member_role = selected["role"]
+                        st.session_state.session_token = session_token
+                        st.session_state.is_admin = (
+                            discord_id in _settings.ADMIN_DISCORD_IDS
+                        )
+                        _is_active, _is_read_only = db.check_company_access(cid)
+                        st.session_state.is_read_only = _is_read_only
+                        st.session_state.is_active = _is_active
 
-                    # Check admin status
-                    st.session_state.is_admin = (
-                        discord_id in _settings.ADMIN_DISCORD_IDS
-                    )
+                        st.query_params.clear()
+                        st.query_params["session"] = f"{mid}:{cid}:{session_token}"
+                        st.rerun()
 
-                    # Check read-only status
-                    _is_active, _is_read_only = db.check_company_access(company["id"])
-                    st.session_state.is_read_only = _is_read_only
-                    st.session_state.is_active = _is_active
-
-                    # Clear query params so code doesn't persist, keep session token
-                    st.query_params.clear()
-                    st.query_params["session"] = f"{company['id']}:{session_token}"
-                    st.rerun()
+                    # Also show invite acceptance option
+                    st.markdown("---")
+                    st.subheader("🎟️ Have an invite code?")
+                    invite_code = st.text_input("Enter invite code:", key="invite_code_input")
+                    if st.button("Accept Invite", type="secondary", use_container_width=True):
+                        if invite_code.strip():
+                            member = db.add_member_by_invite(
+                                invite_code.strip(),
+                                discord_id,
+                                discord_username,
+                                discord_avatar,
+                            )
+                            if member:
+                                st.success("✅ You've been added to a new company! Select it above.")
+                                st.rerun()
+                            else:
+                                st.error("❌ Invalid invite code or already a member.")
                 else:
-                    st.error("❌ Could not create or find your company account.")
+                    # First time user — get or create company + owner membership
+                    try:
+                        company, member = db.get_or_create_company_by_discord(
+                            discord_id, discord_username, discord_avatar
+                        )
+                    except Exception as exc:
+                        st.error(f"❌ Database error: {exc}")
+                        company = None
+                        member = None
+
+                    if company and member:
+                        session_token = store_session(member["id"])
+
+                        st.session_state.company_id = company["id"]
+                        st.session_state.company_name = company.get("company_name", "")
+                        st.session_state.member_id = member["id"]
+                        st.session_state.discord_id = discord_id
+                        st.session_state.discord_username = discord_username
+                        st.session_state.discord_avatar_url = discord_avatar
+                        st.session_state.member_role = "owner"
+                        st.session_state.session_token = session_token
+                        st.session_state.is_admin = (
+                            discord_id in _settings.ADMIN_DISCORD_IDS
+                        )
+                        _is_active, _is_read_only = db.check_company_access(company["id"])
+                        st.session_state.is_read_only = _is_read_only
+                        st.session_state.is_active = _is_active
+
+                        st.query_params.clear()
+                        st.query_params["session"] = f"{member['id']}:{company['id']}:{session_token}"
+                        st.rerun()
+                    else:
+                        st.error("❌ Could not create or find your company account.")
             else:
                 st.error("❌ Discord login failed. Please try again.")
 

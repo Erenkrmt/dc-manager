@@ -96,17 +96,29 @@ def _ph() -> str:
 _SQLITE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    discord_id TEXT NOT NULL UNIQUE,
-    discord_username TEXT NOT NULL,
-    discord_avatar TEXT DEFAULT '',
     api_key TEXT NOT NULL UNIQUE,
     company_name TEXT DEFAULT '',
     access_expires_at TEXT,
     is_active INTEGER DEFAULT 1,
     trial_used INTEGER DEFAULT 0,
     tier TEXT DEFAULT 'free',
+    public_stash_token TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS company_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    discord_id TEXT NOT NULL,
+    discord_username TEXT NOT NULL,
+    discord_avatar TEXT DEFAULT '',
+    role TEXT DEFAULT 'member',
+    session_token TEXT DEFAULT '',
+    session_created_at TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(company_id, discord_id)
 );
 
 CREATE TABLE IF NOT EXISTS deals (
@@ -189,17 +201,29 @@ CREATE TABLE IF NOT EXISTS stash (
 _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
     id SERIAL PRIMARY KEY,
-    discord_id TEXT NOT NULL UNIQUE,
-    discord_username TEXT NOT NULL,
-    discord_avatar TEXT DEFAULT '',
     api_key TEXT NOT NULL UNIQUE,
     company_name TEXT DEFAULT '',
     access_expires_at TEXT,
     is_active INTEGER DEFAULT 1,
     trial_used INTEGER DEFAULT 0,
     tier TEXT DEFAULT 'free',
+    public_stash_token TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS company_members (
+    id SERIAL PRIMARY KEY,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    discord_id TEXT NOT NULL,
+    discord_username TEXT NOT NULL,
+    discord_avatar TEXT DEFAULT '',
+    role TEXT DEFAULT 'member',
+    session_token TEXT DEFAULT '',
+    session_created_at TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(company_id, discord_id)
 );
 
 CREATE TABLE IF NOT EXISTS deals (
@@ -396,49 +420,75 @@ def _generate_api_key() -> str:
     return raw_key
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Company Members (multi-user per company)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _generate_invite_code() -> str:
+    """Generate a random invite code."""
+    return f"INV-{secrets.token_hex(8)}"
+
+
 def get_or_create_company_by_discord(
     discord_id: str,
     discord_username: str,
     discord_avatar: str = "",
-) -> dict:
+) -> tuple[dict, dict]:
     """
-    Find an existing company by Discord ID, or create a new one with a trial.
-    Returns the company dict.
+    Find user's membership OR create a new company + owner membership.
+    Returns (company_dict, member_dict).
     """
     ph = _ph()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_connection()
     try:
         cursor = conn.cursor()
+
+        # 1. Check if user already has a membership
         cursor.execute(
-            f"SELECT * FROM companies WHERE discord_id = {ph}",
+            f"""SELECT cm.*, c.company_name, c.access_expires_at, c.is_active, c.tier, c.api_key, c.invite_code
+                FROM company_members cm
+                JOIN companies c ON c.id = cm.company_id
+                WHERE cm.discord_id = {ph}
+                ORDER BY cm.role = 'owner' DESC, cm.id ASC
+                LIMIT 1""",
             (discord_id,),
         )
-        company = _fetchone_as_dict(cursor)
+        row = _fetchone_as_dict(cursor)
 
-        if company:
-            # Update username/avatar on every login
-            if _USE_POSTGRES:
-                cursor.execute(
-                    """UPDATE companies SET discord_username = %s, discord_avatar = %s, updated_at = %s
-                       WHERE id = %s""",
-                    (discord_username, discord_avatar, now, company["id"]),
-                )
-            else:
-                cursor.execute(
-                    """UPDATE companies SET discord_username = ?, discord_avatar = ?, updated_at = ?
-                       WHERE id = ?""",
-                    (discord_username, discord_avatar, now, company["id"]),
-                )
+        if row:
+            # Update username/avatar
+            cursor.execute(
+                f"UPDATE company_members SET discord_username = {ph}, discord_avatar = {ph}, updated_at = {ph} WHERE id = {ph}",
+                (discord_username, discord_avatar, now, row["id"]),
+            )
             conn.commit()
-            company["discord_username"] = discord_username
-            company["discord_avatar"] = discord_avatar
-            company["api_key"] = ""  # existing companies: don't expose the stored hash
-            return company
 
-        # Create new company with trial
+            company = {
+                "id": row["company_id"],
+                "company_name": row["company_name"],
+                "access_expires_at": row["access_expires_at"],
+                "is_active": row["is_active"],
+                "tier": row["tier"],
+                "api_key": "",
+                "invite_code": row.get("invite_code", ""),
+            }
+            member = {
+                "id": row["id"],
+                "company_id": row["company_id"],
+                "discord_id": row["discord_id"],
+                "discord_username": discord_username,
+                "discord_avatar": discord_avatar,
+                "role": row["role"],
+                "session_token": row.get("session_token", ""),
+            }
+            return company, member
+
+        # 2. No membership — create new company + owner member
         raw_api_key = _generate_api_key()
         hashed_api_key = _hash_api_key(raw_api_key)
+        invite_code = _generate_invite_code()
         trial_end = None
         if _settings.TRIAL_DAYS > 0:
             from datetime import timedelta
@@ -447,59 +497,355 @@ def get_or_create_company_by_discord(
                 datetime.now(timezone.utc) + timedelta(days=_settings.TRIAL_DAYS)
             ).strftime("%Y-%m-%d %H:%M:%S")
 
+        cursor.execute(
+            f"""INSERT INTO companies (api_key, company_name, access_expires_at, is_active, trial_used, tier, public_stash_token, invite_code, created_at, updated_at)
+                VALUES ({ph}, {ph}, {ph}, 1, 1, 'free', '', {ph}, {ph}, {ph})""",
+            (hashed_api_key, "", trial_end, invite_code, now, now),
+        )
+        company_id = cursor.lastrowid if not _USE_POSTGRES else cursor.fetchone()
+
+        # Get the new company ID for PostgreSQL
         if _USE_POSTGRES:
-            cursor.execute(
-                """INSERT INTO companies (discord_id, discord_username, discord_avatar, api_key,
-                                          company_name, access_expires_at, is_active, trial_used,
-                                          created_at, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, 1, 1, %s, %s)""",
-                (
-                    discord_id,
-                    discord_username,
-                    discord_avatar,
-                    hashed_api_key,
-                    "",
-                    trial_end,
-                    now,
-                    now,
-                ),
-            )
-        else:
-            cursor.execute(
-                """INSERT INTO companies (discord_id, discord_username, discord_avatar, api_key,
-                                          company_name, access_expires_at, is_active, trial_used,
-                                          created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?)""",
-                (
-                    discord_id,
-                    discord_username,
-                    discord_avatar,
-                    hashed_api_key,
-                    "",
-                    trial_end,
-                    now,
-                    now,
-                ),
-            )
+            cursor.execute("SELECT LASTVAL()")
+            company_id = cursor.fetchone()["lastval"]
+
+        # Create owner member
+        cursor.execute(
+            f"""INSERT INTO company_members (company_id, discord_id, discord_username, discord_avatar, role, session_token, session_created_at, created_at, updated_at)
+                VALUES ({ph}, {ph}, {ph}, {ph}, 'owner', '', NULL, {ph}, {ph})""",
+            (company_id, discord_id, discord_username, discord_avatar, now, now),
+        )
+        member_id = cursor.lastrowid if not _USE_POSTGRES else 0
+        if _USE_POSTGRES:
+            cursor.execute("SELECT LASTVAL()")
+            member_id = cursor.fetchone()["lastval"]
+
         conn.commit()
 
-        # Fetch the newly created company and inject the raw API key
-        cursor.execute(
-            f"SELECT * FROM companies WHERE discord_id = {ph}",
-            (discord_id,),
-        )
-        company = _fetchone_as_dict(cursor)
-        company["api_key"] = raw_api_key  # return the raw key, not the hash
-        logger.info(
-            "New company created via Discord: %s (%s)", discord_username, discord_id
-        )
-        return company
+        company = {
+            "id": company_id,
+            "company_name": "",
+            "access_expires_at": trial_end,
+            "is_active": True,
+            "tier": "free",
+            "api_key": raw_api_key,
+            "invite_code": invite_code,
+        }
+        member = {
+            "id": member_id,
+            "company_id": company_id,
+            "discord_id": discord_id,
+            "discord_username": discord_username,
+            "discord_avatar": discord_avatar,
+            "role": "owner",
+            "session_token": "",
+        }
+        logger.info("New company created via Discord: %s (%s)", discord_username, discord_id)
+        return company, member
 
     except Exception:
         logger.exception("Failed to get/create company")
         raise
     finally:
         conn.close()
+
+
+def get_user_companies(discord_id: str) -> list[dict]:
+    """
+    Return all companies a Discord user belongs to (via company_members).
+    Each dict contains company info + member role.
+    """
+    ph = _ph()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""SELECT c.id AS company_id, c.company_name, c.is_active, c.access_expires_at, c.tier,
+                       cm.id AS member_id, cm.role, cm.discord_username, cm.discord_avatar
+                FROM company_members cm
+                JOIN companies c ON c.id = cm.company_id
+                WHERE cm.discord_id = {ph}
+                ORDER BY cm.role = 'owner' DESC, c.company_name ASC""",
+            (discord_id,),
+        )
+        rows = _fetchall_as_dicts(cursor)
+        conn.close()
+        # Format the responses
+        result = []
+        for row in rows:
+            result.append({
+                "company_id": row["company_id"],
+                "company_name": row["company_name"] or f"Company #{row['company_id']}",
+                "is_active": bool(row["is_active"]),
+                "access_expires_at": row["access_expires_at"],
+                "tier": row["tier"],
+                "member_id": row["member_id"],
+                "role": row["role"],
+                "discord_username": row["discord_username"],
+                "discord_avatar": row["discord_avatar"],
+            })
+        return result
+    except Exception:
+        logger.exception("Failed to get user companies")
+        return []
+
+
+def get_company_members(company_id: int) -> list[dict]:
+    """Return all members of a company."""
+    ph = _ph()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""SELECT cm.* FROM company_members cm WHERE cm.company_id = {ph} ORDER BY cm.role = 'owner' DESC, cm.role = 'admin' DESC, cm.discord_username ASC""",
+            (company_id,),
+        )
+        rows = _fetchall_as_dicts(cursor)
+        conn.close()
+        return rows
+    except Exception:
+        logger.exception("Failed to get company members")
+        return []
+
+
+def add_company_member(
+    company_id: int,
+    discord_id: str,
+    discord_username: str,
+    discord_avatar: str = "",
+    role: str = "member",
+) -> Optional[dict]:
+    """
+    Add a new member to a company. Returns the member dict or None if duplicate/failure.
+    """
+    ph = _ph()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Check if already a member
+        cursor.execute(
+            f"SELECT id FROM company_members WHERE company_id = {ph} AND discord_id = {ph}",
+            (company_id, discord_id),
+        )
+        if cursor.fetchone():
+            conn.close()
+            return None  # Already a member
+
+        cursor.execute(
+            f"""INSERT INTO company_members (company_id, discord_id, discord_username, discord_avatar, role, session_token, session_created_at, created_at, updated_at)
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, '', NULL, {ph}, {ph})""",
+            (company_id, discord_id, discord_username, discord_avatar, role, now, now),
+        )
+        conn.commit()
+
+        # Fetch newly created member
+        member_id = cursor.lastrowid if not _USE_POSTGRES else 0
+        if _USE_POSTGRES:
+            cursor.execute("SELECT LASTVAL()")
+            member_id = cursor.fetchone()["lastval"]
+
+        cursor.execute(
+            f"SELECT * FROM company_members WHERE id = {ph}",
+            (member_id,),
+        )
+        member = _fetchone_as_dict(cursor)
+        conn.close()
+        logger.info("Member %s added to company %d as %s", discord_username, company_id, role)
+        return member
+    except Exception:
+        logger.exception("Failed to add company member")
+        return None
+
+
+def remove_company_member(company_id: int, member_id: int) -> bool:
+    """
+    Remove a member from a company. Cannot remove the last owner.
+    """
+    ph = _ph()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Check if this member is an owner
+        cursor.execute(
+            f"SELECT role FROM company_members WHERE id = {ph} AND company_id = {ph}",
+            (member_id, company_id),
+        )
+        row = _fetchone_as_dict(cursor)
+        if not row:
+            conn.close()
+            return False
+
+        if row["role"] == "owner":
+            # Check if this is the last owner
+            cursor.execute(
+                f"SELECT COUNT(*) AS cnt FROM company_members WHERE company_id = {ph} AND role = 'owner'",
+                (company_id,),
+            )
+            owner_count = cursor.fetchone()
+            owner_cnt = dict(owner_count)["cnt"] if owner_count else 1
+            if owner_cnt <= 1:
+                conn.close()
+                return False  # Can't remove the last owner
+
+        cursor.execute(
+            f"DELETE FROM company_members WHERE id = {ph} AND company_id = {ph}",
+            (member_id, company_id),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Member %d removed from company %d", member_id, company_id)
+        return True
+    except Exception:
+        logger.exception("Failed to remove company member")
+        return False
+
+
+def transfer_ownership(company_id: int, current_owner_member_id: int, new_owner_member_id: int) -> bool:
+    """
+    Transfer company ownership from one member to another.
+    The old owner becomes an admin.
+    """
+    ph = _ph()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Verify current owner
+        cursor.execute(
+            f"SELECT id FROM company_members WHERE id = {ph} AND company_id = {ph} AND role = 'owner'",
+            (current_owner_member_id, company_id),
+        )
+        if not cursor.fetchone():
+            conn.close()
+            return False
+
+        # Verify new owner is a member
+        cursor.execute(
+            f"SELECT id FROM company_members WHERE id = {ph} AND company_id = {ph}",
+            (new_owner_member_id, company_id),
+        )
+        if not cursor.fetchone():
+            conn.close()
+            return False
+
+        # Demote old owner to admin
+        cursor.execute(
+            f"UPDATE company_members SET role = 'admin', updated_at = {ph} WHERE id = {ph}",
+            (now, current_owner_member_id),
+        )
+        # Promote new owner
+        cursor.execute(
+            f"UPDATE company_members SET role = 'owner', updated_at = {ph} WHERE id = {ph}",
+            (now, new_owner_member_id),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Ownership of company %d transferred to member %d", company_id, new_owner_member_id)
+        return True
+    except Exception:
+        logger.exception("Failed to transfer ownership")
+        return False
+
+
+def generate_company_invite_code(company_id: int) -> Optional[str]:
+    """Generate a new invite code for a company. Returns the code or None on failure."""
+    ph = _ph()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    invite_code = _generate_invite_code()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE companies SET invite_code = {ph}, updated_at = {ph} WHERE id = {ph}",
+            (invite_code, now, company_id),
+        )
+        conn.commit()
+        conn.close()
+        logger.info("Invite code regenerated for company %d", company_id)
+        return invite_code
+    except Exception:
+        logger.exception("Failed to generate invite code")
+        return None
+
+
+def get_company_by_invite_code(invite_code: str) -> Optional[dict]:
+    """Look up a company by its invite code. Returns None if not found or inactive."""
+    ph = _ph()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM companies WHERE invite_code = {ph} AND is_active = 1",
+            (invite_code,),
+        )
+        row = _fetchone_as_dict(cursor)
+        conn.close()
+        return row
+    except Exception:
+        logger.exception("Failed to look up company by invite code")
+        return None
+
+
+def add_member_by_invite(invite_code: str, discord_id: str, discord_username: str, discord_avatar: str = "") -> Optional[dict]:
+    """
+    Accept an invite code and add the user as a member to that company.
+    Returns the member dict, or None if invalid/already a member.
+    """
+    company = get_company_by_invite_code(invite_code)
+    if not company:
+        return None
+    return add_company_member(
+        company_id=company["id"],
+        discord_id=discord_id,
+        discord_username=discord_username,
+        discord_avatar=discord_avatar,
+        role="member",
+    )
+
+
+def update_company_member_role(company_id: int, member_id: int, new_role: str) -> bool:
+    """Update a member's role. Cannot change the last owner to a non-owner role."""
+    ph = _ph()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    if new_role not in ("owner", "admin", "member"):
+        return False
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # If demoting owner, ensure there's another owner
+        cursor.execute(
+            f"SELECT role FROM company_members WHERE id = {ph} AND company_id = {ph}",
+            (member_id, company_id),
+        )
+        row = _fetchone_as_dict(cursor)
+        if not row:
+            conn.close()
+            return False
+        if row["role"] == "owner" and new_role != "owner":
+            cursor.execute(
+                f"SELECT COUNT(*) AS cnt FROM company_members WHERE company_id = {ph} AND role = 'owner'",
+                (company_id,),
+            )
+            owner_count = dict(cursor.fetchone())["cnt"]
+            if owner_count <= 1:
+                conn.close()
+                return False
+
+        cursor.execute(
+            f"UPDATE company_members SET role = {ph}, updated_at = {ph} WHERE id = {ph} AND company_id = {ph}",
+            (new_role, now, member_id, company_id),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        logger.exception("Failed to update member role")
+        return False
 
 
 def get_company_by_api_key(api_key: str) -> Optional[dict]:
