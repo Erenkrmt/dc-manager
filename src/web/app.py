@@ -73,8 +73,8 @@ def _store_session_token(company_id: int, token: str) -> None:
         )
         conn.commit()
         conn.close()
-    except Exception as exc:
-        logger.error("Failed to store session token: %s", exc)
+    except Exception:
+        logger.exception("Failed to store session token")
 
 
 def _clear_session_token(company_id: int) -> None:
@@ -89,8 +89,8 @@ def _clear_session_token(company_id: int) -> None:
         )
         conn.commit()
         conn.close()
-    except Exception as exc:
-        logger.error("Failed to clear session token: %s", exc)
+    except Exception:
+        logger.exception("Failed to clear session token")
 
 
 def _try_restore_session() -> bool:
@@ -734,7 +734,7 @@ def _handle_deal_logging(  # noqa: PLR0913 - many parameters needed for logging 
         )
         st.info(f"📦 Auto-subtracted from stash: {_format_subtract_result(sub_result)}")
     else:
-        col_sub1, col_sub2 = st.columns([1, 1])
+        col_sub1, _ = st.columns([1, 1])
         with col_sub1:
             subtract_choice = st.checkbox(
                 "📦 Subtract these materials from stash?",

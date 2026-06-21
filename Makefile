@@ -3,7 +3,7 @@
 # Common tasks for development and deployment.
 # =============================================================================
 
-.PHONY: help install dev streamlit api docker-build docker-up docker-down test clean env env-encrypt install-hooks
+.PHONY: help install dev streamlit api docker-build docker-up docker-down test clean sonar env env-encrypt install-hooks
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -44,6 +44,21 @@ env-encrypt: ## Encrypt .env → .env.encrypted (OS-agnostic, requires sops + ag
 
 install-hooks: ## Install git hooks (pre-commit: encrypt, post-merge: decrypt)
 	python scripts/install_hooks.py
+
+sonar: ## Start SonarQube locally and run analysis (docker compose --profile sonar)
+	@echo === Starting SonarQube (this may take ~90s on first run) ===
+	docker compose --profile sonar up -d sonarqube
+	@echo Waiting 90s for SonarQube to start...
+	@timeout /t 90 /nobreak >nul
+	@echo === Running sonar-scanner ===
+	docker run --rm ^
+		--network dc_trade_api_default ^
+		-e SONAR_HOST_URL=http://dc-trade-sonar:9000 ^
+		-v "%CD%:/usr/src" ^
+		sonarsource/sonar-scanner-cli ^
+		-Dsonar.projectBaseDir=/usr/src
+	@echo === Results available at http://localhost:9000 ===
+	@echo Default login: admin / admin (change on first login)
 
 test: ## Run tests
 	python -m pytest tests/ -v

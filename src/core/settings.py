@@ -129,7 +129,7 @@ class Settings:
 
     # -- Computed Discord redirect URI ----------------------------------
     @property
-    def DISCORD_REDIRECT_URI(self) -> str:
+    def discord_redirect_uri(self) -> str:
         """
         Return the Discord OAuth redirect URI.
         When SSL is enabled, automatically upgrades http:// → https://

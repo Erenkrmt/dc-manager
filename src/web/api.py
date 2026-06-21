@@ -14,6 +14,7 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
+from typing import Annotated
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,6 +90,9 @@ def _require_admin(api_key: str) -> dict:
     return company
 
 
+AuthDep = Annotated[str, Depends(get_api_key)]
+
+
 # ---------------------------------------------------------------------------
 # CORS middleware
 # ---------------------------------------------------------------------------
@@ -105,8 +109,8 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 
-@app.get("/auth/me")
-def auth_me(api_key: str = Depends(get_api_key)) -> dict:
+@app.get("/auth/me", responses={401: {"description": "Missing or invalid API key"}})
+def auth_me(api_key: AuthDep) -> dict:
     """Return the current company info based on API key."""
     company = _resolve_company(api_key)
     is_active, is_read_only = db.check_company_access(company["id"])
@@ -139,8 +143,8 @@ def register_company(
     }
 
 
-@app.put("/auth/name")
-def update_company_name(name: str, api_key: str = Depends(get_api_key)) -> dict:
+@app.put("/auth/name", responses={401: {"description": "Missing or invalid API key"}})
+def update_company_name(name: str, api_key: AuthDep) -> dict:
     """Update the current company's display name."""
     company = _resolve_company(api_key)
     db.update_company_name(company["id"], name)
@@ -152,17 +156,28 @@ def update_company_name(name: str, api_key: str = Depends(get_api_key)) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@app.get("/admin/companies")
-def admin_list_companies(api_key: str = Depends(get_api_key)) -> list:
+@app.get(
+    "/admin/companies",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Admin access required"},
+    },
+)
+def admin_list_companies(api_key: AuthDep) -> list:
     """List all companies (admin only). Authenticated admin Discord IDs only."""
     _require_admin(api_key)
     return db.list_all_companies()
 
 
-@app.post("/admin/companies/{company_id}/extend")
-def admin_extend_access(
-    company_id: int, days: int, api_key: str = Depends(get_api_key)
-) -> dict:
+@app.post(
+    "/admin/companies/{company_id}/extend",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Admin access required"},
+        500: {"description": "Failed to extend access"},
+    },
+)
+def admin_extend_access(company_id: int, days: int, api_key: AuthDep) -> dict:
     """Extend a company's access by N days. Admin only."""
     _require_admin(api_key)
     if db.update_company_access(company_id, days):
@@ -170,10 +185,15 @@ def admin_extend_access(
     raise HTTPException(status_code=500, detail="Failed to extend access")
 
 
-@app.post("/admin/companies/{company_id}/deactivate")
-def admin_deactivate_company(
-    company_id: int, api_key: str = Depends(get_api_key)
-) -> dict:
+@app.post(
+    "/admin/companies/{company_id}/deactivate",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Admin access required"},
+        500: {"description": "Failed to deactivate company"},
+    },
+)
+def admin_deactivate_company(company_id: int, api_key: AuthDep) -> dict:
     """Deactivate a company. Admin only."""
     _require_admin(api_key)
     if db.deactivate_company(company_id):
@@ -186,8 +206,8 @@ def admin_deactivate_company(
 # ---------------------------------------------------------------------------
 
 
-@app.get("/stash")
-def get_stash(api_key: str = Depends(get_api_key)) -> dict:
+@app.get("/stash", responses={401: {"description": "Missing or invalid API key"}})
+def get_stash(api_key: AuthDep) -> dict:
     """Return the current stash as JSON for the authenticated company."""
     company = _resolve_company(api_key)
     stash = db.load_stash(company_id=company["id"])
@@ -206,22 +226,31 @@ def get_stash(api_key: str = Depends(get_api_key)) -> dict:
     return stash
 
 
-@app.get("/stash/raw")
-def get_stash_raw(api_key: str = Depends(get_api_key)) -> dict:
+@app.get("/stash/raw", responses={401: {"description": "Missing or invalid API key"}})
+def get_stash_raw(api_key: AuthDep) -> dict:
     """Return the stash exactly as stored in the database."""
     company = _resolve_company(api_key)
     return db.load_stash(company_id=company["id"])
 
 
-@app.get("/stash/auto_subtract")
-def get_auto_subtract(api_key: str = Depends(get_api_key)) -> dict:
+@app.get(
+    "/stash/auto_subtract",
+    responses={401: {"description": "Missing or invalid API key"}},
+)
+def get_auto_subtract(api_key: AuthDep) -> dict:
     """Return whether auto-subtract is enabled."""
     company = _resolve_company(api_key)
     return {"auto_subtract": db.get_auto_subtract(company_id=company["id"])}
 
 
-@app.put("/stash/auto_subtract")
-def set_auto_subtract(enabled: bool, api_key: str = Depends(get_api_key)) -> dict:
+@app.put(
+    "/stash/auto_subtract",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Read-only or inactive"},
+    },
+)
+def set_auto_subtract(enabled: bool, api_key: AuthDep) -> dict:
     """Enable or disable auto-subtract."""
     company = _resolve_company(api_key)
     _check_write_access(company)
@@ -229,8 +258,14 @@ def set_auto_subtract(enabled: bool, api_key: str = Depends(get_api_key)) -> dic
     return {"auto_subtract": enabled}
 
 
-@app.put("/stash")
-def save_stash(data: dict, api_key: str = Depends(get_api_key)) -> dict:
+@app.put(
+    "/stash",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Read-only or inactive"},
+    },
+)
+def save_stash(data: dict, api_key: AuthDep) -> dict:
     """Save the stash for the authenticated company."""
     company = _resolve_company(api_key)
     _check_write_access(company)
@@ -238,15 +273,21 @@ def save_stash(data: dict, api_key: str = Depends(get_api_key)) -> dict:
     return db.load_stash(company_id=company["id"])
 
 
-@app.put("/stash/add")
+@app.put(
+    "/stash/add",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Read-only or inactive"},
+    },
+)
 def add_to_stash(
+    api_key: AuthDep,
     iron_blocks: int = 0,
     iron_ingots: int = 0,
     gold_blocks: int = 0,
     gold_ingots: int = 0,
     diamond_blocks: int = 0,
     diamond_items: int = 0,
-    api_key: str = Depends(get_api_key),
 ) -> dict:
     """Add materials to the stash."""
     company = _resolve_company(api_key)
@@ -262,8 +303,14 @@ def add_to_stash(
     )
 
 
-@app.post("/stash/clear")
-def clear_stash(api_key: str = Depends(get_api_key)) -> dict:
+@app.post(
+    "/stash/clear",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Read-only or inactive"},
+    },
+)
+def clear_stash(api_key: AuthDep) -> dict:
     """Clear the stash."""
     company = _resolve_company(api_key)
     _check_write_access(company)
@@ -312,15 +359,15 @@ def get_prices() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@app.get("/deals")
-def get_deals(limit: int = 100, api_key: str = Depends(get_api_key)) -> list:
+@app.get("/deals", responses={401: {"description": "Missing or invalid API key"}})
+def get_deals(api_key: AuthDep, limit: int = 100) -> list:
     """Return recent deals for the authenticated company."""
     company = _resolve_company(api_key)
     return db.get_all_deals(limit=limit, company_id=company["id"])
 
 
-@app.get("/deals/stats")
-def get_deal_stats(api_key: str = Depends(get_api_key)) -> dict:
+@app.get("/deals/stats", responses={401: {"description": "Missing or invalid API key"}})
+def get_deal_stats(api_key: AuthDep) -> dict:
     """Return aggregate deal statistics."""
     company = _resolve_company(api_key)
     return db.get_deal_stats(company_id=company["id"])
@@ -452,14 +499,22 @@ def _render_public_stash_page(company: dict) -> str:
     )
 
 
-@app.get("/stash/public", response_class=HTMLResponse)
-def get_stash_public(api_key: str = Depends(get_api_key)) -> str:
+@app.get(
+    "/stash/public",
+    response_class=HTMLResponse,
+    responses={401: {"description": "Missing or invalid API key"}},
+)
+def get_stash_public(api_key: AuthDep) -> str:
     """Return a public, read-only HTML page showing the stash (authenticated)."""
     company = _resolve_company(api_key)
     return _render_public_stash_page(company)
 
 
-@app.get("/stash/public/{token}", response_class=HTMLResponse)
+@app.get(
+    "/stash/public/{token}",
+    response_class=HTMLResponse,
+    responses={404: {"description": "Invalid or inactive public stash token"}},
+)
 def get_stash_public_by_token(token: str) -> str:
     """
     Return a public, read-only HTML page showing a company's stash via public token.
@@ -478,16 +533,26 @@ def get_stash_public_by_token(token: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@app.get("/stash/public_token")
-def get_public_token(api_key: str = Depends(get_api_key)) -> dict:
+@app.get(
+    "/stash/public_token",
+    responses={401: {"description": "Missing or invalid API key"}},
+)
+def get_public_token(api_key: AuthDep) -> dict:
     """Return the current company's public stash token (or empty if not set)."""
     company = _resolve_company(api_key)
     token = company.get("public_stash_token", "")
     return {"public_stash_token": token}
 
 
-@app.post("/stash/public_token/generate")
-def generate_public_token(api_key: str = Depends(get_api_key)) -> dict:
+@app.post(
+    "/stash/public_token/generate",
+    responses={
+        401: {"description": "Missing or invalid API key"},
+        403: {"description": "Read-only or inactive"},
+        500: {"description": "Failed to generate token"},
+    },
+)
+def generate_public_token(api_key: AuthDep) -> dict:
     """Generate a new public stash token for the authenticated company."""
     company = _resolve_company(api_key)
     _check_write_access(company)

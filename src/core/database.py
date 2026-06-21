@@ -1377,8 +1377,8 @@ def import_items_to_stash(
         if not line or ":" not in line:
             continue
 
-        clean = re.sub(r"^\[.*?\]\s*\[.*?\]\s*:\s*\[CHAT\]\s*", "", line)
-        clean = re.sub(r"^\[.*?\]\s*", "", clean)
+        clean = re.sub(r"^\[[^\]]*\]\s*\[[^\]]*\]\s*:\s*\[CHAT\]\s*", "", line)
+        clean = re.sub(r"^\[[^\]]*\]\s*", "", clean)
 
         if ":" not in clean:
             skipped_lines.append(line)

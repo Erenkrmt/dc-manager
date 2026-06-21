@@ -33,11 +33,14 @@ class Company(Base):
     updated_at = Column(Text, nullable=False)
 
 
+_COMPANIES_ID = "companies.id"
+
+
 class Deal(Base):
     __tablename__ = "deals"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
+    company_id = Column(Integer, ForeignKey(_COMPANIES_ID), nullable=False, default=1)
     timestamp = Column(Text, nullable=False)
     iron_ingots = Column(Float, default=0)
     gold_ingots = Column(Float, default=0)
@@ -69,7 +72,7 @@ class Stash(Base):
     __tablename__ = "stash"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
+    company_id = Column(Integer, ForeignKey(_COMPANIES_ID), nullable=False, default=1)
     name = Column(Text, default="Default")
     iron_blocks = Column(Integer, default=0)
     iron_ingots = Column(Integer, default=0)
@@ -89,7 +92,7 @@ class Template(Base):
     __tablename__ = "templates"
 
     name = Column(Text, primary_key=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
+    company_id = Column(Integer, ForeignKey(_COMPANIES_ID), nullable=False, default=1)
     iron_ingots = Column(Float, default=0)
     gold_ingots = Column(Float, default=0)
     diamond_items = Column(Float, default=0)
@@ -100,7 +103,7 @@ class PriceHistory(Base):
     __tablename__ = "price_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
+    company_id = Column(Integer, ForeignKey(_COMPANIES_ID), nullable=False, default=1)
     timestamp = Column(Text, nullable=False)
     iron_price = Column(Float, default=0)
     gold_price = Column(Float, default=0)
@@ -111,7 +114,7 @@ class ItemLookupDeal(Base):
     __tablename__ = "item_lookup_deals"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, default=1)
+    company_id = Column(Integer, ForeignKey(_COMPANIES_ID), nullable=False, default=1)
     timestamp = Column(Text, nullable=False)
     item_name = Column(Text, nullable=False)
     quantity = Column(Integer, nullable=False)

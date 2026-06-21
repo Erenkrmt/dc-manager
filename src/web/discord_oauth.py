@@ -23,7 +23,7 @@ def get_authorize_url(state: str = "") -> str:
     """
     params = {
         "client_id": _settings.DISCORD_CLIENT_ID,
-        "redirect_uri": _settings.DISCORD_REDIRECT_URI,
+        "redirect_uri": _settings.discord_redirect_uri,
         "response_type": "code",
         "scope": "identify",
     }
@@ -48,7 +48,7 @@ async def exchange_code(code: str) -> dict | None:
         "client_secret": _settings.DISCORD_CLIENT_SECRET,
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": _settings.DISCORD_REDIRECT_URI,
+        "redirect_uri": _settings.discord_redirect_uri,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -66,8 +66,8 @@ async def exchange_code(code: str) -> dict | None:
                 )
                 return None
             return resp.json()
-    except Exception as exc:
-        logger.error("Discord token exchange error: %s", exc)
+    except Exception:
+        logger.exception("Discord token exchange error")
         return None
 
 
@@ -90,8 +90,8 @@ async def get_user_info(access_token: str) -> dict | None:
                 )
                 return None
             return resp.json()
-    except Exception as exc:
-        logger.error("Discord user info error: %s", exc)
+    except Exception:
+        logger.exception("Discord user info error")
         return None
 
 
@@ -114,7 +114,7 @@ def exchange_code_sync(code: str) -> dict | None:
         "client_secret": _settings.DISCORD_CLIENT_SECRET,
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": _settings.DISCORD_REDIRECT_URI,
+        "redirect_uri": _settings.discord_redirect_uri,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -134,8 +134,8 @@ def exchange_code_sync(code: str) -> dict | None:
                 )
                 return None
             return resp.json()
-    except Exception as exc:
-        logger.error("Discord token exchange (sync) error: %s", exc)
+    except Exception:
+        logger.exception("Discord token exchange (sync) error")
         return None
 
 
@@ -160,8 +160,8 @@ def get_user_info_sync(access_token: str) -> dict | None:
                 )
                 return None
             return resp.json()
-    except Exception as exc:
-        logger.error("Discord user info (sync) error: %s", exc)
+    except Exception:
+        logger.exception("Discord user info (sync) error")
         return None
 
 
