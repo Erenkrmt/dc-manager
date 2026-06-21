@@ -93,50 +93,6 @@ def _clear_session_token(company_id: int) -> None:
         logger.exception("Failed to clear session token")
 
 
-def _inject_localstorage_save() -> None:
-    """Inject JS to persist the current session token into the browser's localStorage.
-    Called after login and after token rotation to keep localStorage in sync."""
-    cid = st.session_state.get("company_id")
-    token = st.session_state.get("session_token")
-    if cid and token:
-        st.markdown(
-            f"""<script>
-localStorage.setItem('dc_trade_session', '{cid}:{token}');
-</script>""",
-            unsafe_allow_html=True,
-        )
-
-
-def _inject_localstorage_clear() -> None:
-    """Inject JS to remove the session token from the browser's localStorage."""
-    st.markdown(
-        """<script>
-localStorage.removeItem('dc_trade_session');
-</script>""",
-        unsafe_allow_html=True,
-    )
-
-
-def _inject_localstorage_restore() -> bool:
-    """Inject JS to restore session from localStorage.
-    If a token is found in localStorage, we redirect with it as a query param
-    so _try_restore_session() can process it. Returns True if redirect triggered."""
-    st.markdown(
-        """<script>
-(function() {{
-    var stored = localStorage.getItem('dc_trade_session');
-    if (stored && window.location.search.indexOf('session=') === -1) {{
-        var url = new URL(window.location.href);
-        url.searchParams.set('session', stored);
-        window.location.replace(url.toString());
-    }}
-}})();
-</script>""",
-        unsafe_allow_html=True,
-    )
-    return False
-
-
 def _try_restore_session() -> bool:
     """
     Try to restore session from a one-time URL session token.
@@ -178,10 +134,9 @@ def _try_restore_session() -> bool:
         st.session_state.is_read_only = _is_read_only
         st.session_state.is_active = _is_active
 
-        # Clear the session param from URL — token lives in localStorage now
+        # Update URL with rotated token
         st.query_params.clear()
-        # Save the rotated token to localStorage
-        _inject_localstorage_save()
+        st.query_params["session"] = f"{cid}:{new_token}"
         return True
     except (ValueError, IndexError):
         st.query_params.clear()
@@ -211,12 +166,6 @@ def init_session_state() -> None:
     if st.session_state.company_id is None:
         _try_restore_session()
 
-    # If still not authenticated and no session param in URL, try localStorage
-    if st.session_state.company_id is None:
-        session_param = st.query_params.get("session", None)
-        if not session_param:
-            _inject_localstorage_restore()
-
     if "selected_admin_company" not in st.session_state:
         st.session_state.selected_admin_company = None
     if "template_load" not in st.session_state:
@@ -241,8 +190,6 @@ def clear_session() -> None:
     st.session_state.is_read_only = False
     st.session_state.session_token = ""
     st.session_state.selected_admin_company = None
-    # Clear localStorage token
-    _inject_localstorage_clear()
 
 
 def check_read_only() -> None:
@@ -395,9 +342,9 @@ def render_login_page() -> None:
                     st.session_state.is_read_only = _is_read_only
                     st.session_state.is_active = _is_active
 
-                    # Clear query params so code doesn't persist — token lives in localStorage
+                    # Clear query params so code doesn't persist, keep session token
                     st.query_params.clear()
-                    # Save to localStorage via JS injection on next render
+                    st.query_params["session"] = f"{company['id']}:{session_token}"
                     st.rerun()
                 else:
                     st.error("❌ Could not create or find your company account.")
@@ -465,10 +412,6 @@ with st.container():
             clear_session()
             st.query_params.clear()
             st.rerun()
-
-# After login, sync the session token into localStorage
-if st.session_state.company_id is not None and st.session_state.session_token:
-    _inject_localstorage_save()
 
 st.markdown("---")
 
