@@ -49,15 +49,31 @@ def _patch_db(monkeypatch, tmp_path: Path):
 
 @pytest.fixture
 def seed_company(_patch_db):
-    """Create a test company and return its id + api_key."""
+    """Create a test company and return its id + api_key + member_id."""
     from src.core import database as db
 
-    company = db.get_or_create_company_by_discord(
+    company, member = db.get_or_create_company_by_discord(
         discord_id="test_discord_123",
         discord_username="TestUser",
         discord_avatar="",
     )
-    return company["id"], company["api_key"]
+    return company["id"], company["api_key"], member["id"]
+
+
+def _get_member_session_token(member_id: int) -> str:
+    """Helper: fetch session_token from company_members for a given member."""
+    from src.core import database as db
+
+    ph = db._ph()
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"SELECT session_token FROM company_members WHERE id = {ph}",
+        (member_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row)["session_token"] if row else ""
 
 
 # ── Unit tests: encode/decode helpers ───────────────────────────────────────
@@ -106,7 +122,7 @@ class TestSigning:
 
 class TestTokenGeneration:
     def test_generate_token_format(self):
-        token = generate_session_token(company_id=42)
+        token = generate_session_token(member_id=1, company_id=42)
         assert "." in token
         parts = token.split(".")
         assert len(parts) == 2
@@ -114,16 +130,17 @@ class TestTokenGeneration:
         assert len(parts[1]) == 64  # SHA-256 hex = 64 chars
 
     def test_parse_valid_token(self):
-        token = generate_session_token(company_id=42)
+        token = generate_session_token(member_id=1, company_id=42)
         parsed = parse_session_token(token)
         assert parsed is not None
         assert parsed["cid"] == 42
+        assert parsed["mid"] == 1
         assert "iat" in parsed
         assert "exp" in parsed
 
     def test_parse_expired_token(self):
         with patch.object(sess_module, "_MAX_AGE", -1):  # already expired
-            token = generate_session_token(company_id=42)
+            token = generate_session_token(member_id=1, company_id=42)
         parsed = parse_session_token(token)
         assert parsed is None
 
@@ -132,22 +149,22 @@ class TestTokenGeneration:
         assert parse_session_token("") is None
 
     def test_parse_tampered_token(self):
-        token = generate_session_token(company_id=42)
+        token = generate_session_token(member_id=1, company_id=42)
         # Tamper with the body part
         parts = token.split(".")
         tampered = "AAAA" + "." + parts[1]
         assert parse_session_token(tampered) is None
 
     def test_parse_wrong_cid(self):
-        token = generate_session_token(company_id=42)
+        token = generate_session_token(member_id=1, company_id=42)
         parsed = parse_session_token(token)
         assert parsed is not None
         assert parsed["cid"] == 42
 
     def test_token_idempotent_generation(self):
         """Tokens should be different each time (due to iat changing)."""
-        t1 = generate_session_token(company_id=1)
-        t2 = generate_session_token(company_id=1)
+        t1 = generate_session_token(member_id=1, company_id=1)
+        t2 = generate_session_token(member_id=1, company_id=1)
         assert t1 != t2
 
 
@@ -157,28 +174,28 @@ class TestTokenGeneration:
 class TestValidateSession:
     def test_validate_with_stored_token(self, seed_company):
         """validate_session should succeed if the token is stored in DB."""
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
         from src.web.session import store_session
 
-        token = store_session(company_id)
-        assert validate_session(company_id, token)
+        token = store_session(member_id)
+        assert validate_session(member_id, token)
 
     def test_validate_wrong_token(self, seed_company):
         """validate_session should fail if the token doesn't match DB."""
-        company_id, _ = seed_company
-        token = generate_session_token(company_id)
+        company_id, _api_key, member_id = seed_company
+        token = generate_session_token(member_id=member_id, company_id=company_id)
         # Token not persisted yet
-        assert not validate_session(company_id, token)
+        assert not validate_session(member_id, token)
 
     def test_validate_expired_token(self, seed_company):
         """validate_session should fail for expired tokens."""
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
         from src.web.session import store_session
 
-        store_session(company_id)
+        store_session(member_id)
         # Generate a token with negative max_age so it's immediately expired
         with patch.object(sess_module, "_MAX_AGE", -1):
-            expired_token = generate_session_token(company_id)
+            expired_token = generate_session_token(member_id=member_id, company_id=company_id)
 
         # Token should fail parsing (expired)
         assert parse_session_token(expired_token) is None
@@ -188,15 +205,15 @@ class TestValidateSession:
 
     def test_validate_empty_stored_token(self, seed_company):
         """validate_session should fail if DB has empty session_token."""
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
 
         # Clear the token
         from src.web.session import clear_session
 
-        clear_session(company_id)
+        clear_session(member_id)
 
-        token = generate_session_token(company_id)
-        assert not validate_session(company_id, token)
+        token = generate_session_token(member_id=member_id, company_id=company_id)
+        assert not validate_session(member_id, token)
 
 
 # ── Integration tests: store_session / clear_session / restore_from_url_param
@@ -204,34 +221,30 @@ class TestValidateSession:
 
 class TestStoreClearRestore:
     def test_store_session_updates_db(self, seed_company):
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
         from src.web.session import store_session
-        from src.core import database as db
 
-        token = store_session(company_id)
-        company = db.get_company_by_id(company_id)
-        assert company["session_token"] == token
-        assert company["session_created_at"] is not None
+        token = store_session(member_id)
+        stored_token = _get_member_session_token(member_id)
+        assert stored_token == token
 
     def test_clear_session(self, seed_company):
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
         from src.web.session import store_session, clear_session
-        from src.core import database as db
 
-        store_session(company_id)
-        clear_session(company_id)
+        store_session(member_id)
+        clear_session(member_id)
 
-        company = db.get_company_by_id(company_id)
-        assert company["session_token"] == ""
-        assert company["session_created_at"] is None
+        stored_token = _get_member_session_token(member_id)
+        assert stored_token == ""
 
     def test_restore_from_url_param(self, seed_company):
         """restore_from_url_param should return session state on success."""
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
         from src.web.session import store_session, restore_from_url_param
 
-        token = store_session(company_id)
-        session_data = restore_from_url_param(f"{company_id}:{token}")
+        token = store_session(member_id)
+        session_data = restore_from_url_param(f"{member_id}:{company_id}:{token}")
         assert session_data is not None
         assert session_data["company_id"] == company_id
         assert session_data["session_token"] != token  # rotated
@@ -250,19 +263,19 @@ class TestStoreClearRestore:
 class TestCleanup:
     def test_cleanup_expired_sessions(self, seed_company):
         """cleanup_expired_sessions should clear tokens older than max_age."""
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
         from src.web.session import store_session
         from src.core import database as db
 
-        store_session(company_id)
+        store_session(member_id)
 
-        # Set session_created_at to a very old date manually
+        # Set session_created_at to a very old date manually on company_members
         ph = db._ph()
         conn = db.get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"UPDATE companies SET session_created_at = '2020-01-01 00:00:00' WHERE id = {ph}",
-            (company_id,),
+            f"UPDATE company_members SET session_created_at = '2020-01-01 00:00:00' WHERE id = {ph}",
+            (member_id,),
         )
         conn.commit()
         conn.close()
@@ -270,24 +283,23 @@ class TestCleanup:
         cleaned = db.cleanup_expired_sessions(3600)  # 1 hour max age
         assert cleaned >= 1
 
-        # Verify token is cleared
-        company = db.get_company_by_id(company_id)
-        assert company["session_token"] == ""
-        assert company["session_created_at"] is None
+        # Verify token is cleared from company_members
+        stored_token = _get_member_session_token(member_id)
+        assert stored_token == ""
 
     def test_cleanup_noop_for_fresh_sessions(self, seed_company):
         """cleanup_expired_sessions should NOT touch fresh sessions."""
-        company_id, _ = seed_company
+        company_id, _api_key, member_id = seed_company
         from src.web.session import store_session
         from src.core import database as db
 
-        token = store_session(company_id)
+        token = store_session(member_id)
         time.sleep(0.1)  # Ensure created_at is set
 
         # Try cleaning with a very large max age (should not affect anything)
         cleaned = db.cleanup_expired_sessions(9999999)
         assert cleaned == 0
 
-        # Verify token is still there
-        company = db.get_company_by_id(company_id)
-        assert company["session_token"] == token
+        # Verify token is still there (query company_members)
+        stored_token = _get_member_session_token(member_id)
+        assert stored_token == token

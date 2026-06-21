@@ -21,7 +21,7 @@ _ALLOWED_STASH_COLUMNS = frozenset(
     {"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"}
 )
 _ALLOWED_COMPANY_COLUMNS = frozenset(
-    {"session_token", "session_created_at", "tier", "public_stash_token"}
+    {"session_token", "session_created_at", "tier", "public_stash_token", "invite_code"}
 )
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS companies (
     trial_used INTEGER DEFAULT 0,
     tier TEXT DEFAULT 'free',
     public_stash_token TEXT DEFAULT '',
+    invite_code TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -208,6 +209,7 @@ CREATE TABLE IF NOT EXISTS companies (
     trial_used INTEGER DEFAULT 0,
     tier TEXT DEFAULT 'free',
     public_stash_token TEXT DEFAULT '',
+    invite_code TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -344,7 +346,7 @@ def _run_pg_migrations(cursor, conn) -> None:
         if cursor.fetchone() is None:
             cursor.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
             logger.debug("Migration: added %s column.", col)
-    for col in ["session_token", "session_created_at", "tier", "public_stash_token"]:
+    for col in ["session_token", "session_created_at", "tier", "public_stash_token", "invite_code"]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in PG migration.", col)
             continue
@@ -355,7 +357,7 @@ def _run_pg_migrations(cursor, conn) -> None:
         )
         if cursor.fetchone() is None:
             default_val = (
-                "''" if col in ("session_token", "public_stash_token") else "'free'"
+                "''" if col in ("session_token", "public_stash_token", "invite_code") else "'free'"
             )
             cursor.execute(
                 f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}"
@@ -376,7 +378,7 @@ def _run_sqlite_migrations(conn) -> None:
             logger.debug("Migration: added %s column.", col)
         except sqlite3.OperationalError:
             pass
-    for col in ["session_token", "session_created_at", "tier", "public_stash_token"]:
+    for col in ["session_token", "session_created_at", "tier", "public_stash_token", "invite_code"]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in SQLite migration.", col)
             continue
@@ -1066,6 +1068,7 @@ def get_company_by_public_token(token: str) -> Optional[dict]:
 def cleanup_expired_sessions(max_age_seconds: int) -> int:
     """
     Remove (clear) session tokens that are older than `max_age_seconds` seconds.
+    Sessions are stored per-member in company_members.
     Returns the number of sessions cleaned up.
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -1074,7 +1077,7 @@ def cleanup_expired_sessions(max_age_seconds: int) -> int:
         cursor = conn.cursor()
         if _USE_POSTGRES:
             cursor.execute(
-                """UPDATE companies
+                """UPDATE company_members
                    SET session_token = '', session_created_at = NULL, updated_at = %s
                    WHERE session_token != ''
                      AND session_created_at IS NOT NULL
@@ -1083,7 +1086,7 @@ def cleanup_expired_sessions(max_age_seconds: int) -> int:
             )
         else:
             cursor.execute(
-                """UPDATE companies
+                """UPDATE company_members
                    SET session_token = '', session_created_at = NULL, updated_at = ?
                    WHERE session_token != ''
                      AND session_created_at IS NOT NULL
