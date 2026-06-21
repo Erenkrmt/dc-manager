@@ -27,6 +27,7 @@ class Company(Base):
     is_active = Column(Integer, default=1)
     trial_used = Column(Integer, default=0)
     session_token = Column(Text, default="")
+    session_created_at = Column(Text, nullable=True)
     public_stash_token = Column(Text, default="")
     tier = Column(Text, default="free")  # "free" or "premium"
     created_at = Column(Text, nullable=False)

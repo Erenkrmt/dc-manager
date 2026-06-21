@@ -122,8 +122,10 @@ class Settings:
     ]
     # Trial duration in days (immediate on first Discord login)
     TRIAL_DAYS: int = int(os.getenv("TRIAL_DAYS", "3"))
-    # Session secret for signing cookies (auto-generated if empty)
+    # Session secret for signing session tokens (auto-generated if empty)
     SESSION_SECRET: str = os.getenv("SESSION_SECRET", "")
+    # Session token max age in seconds (default: 7 days)
+    SESSION_MAX_AGE: int = int(os.getenv("SESSION_MAX_AGE", "604800"))
     # API key prefix format
     API_KEY_PREFIX: str = "dc_"
 

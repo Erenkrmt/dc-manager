@@ -8,8 +8,6 @@ import os
 import logging
 import subprocess
 import threading
-import hmac
-import secrets
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -32,6 +30,11 @@ from src.core.market_deal import (
 from src.core.settings import get_settings
 from src.core import database as db
 from src.web.discord_oauth import get_authorize_url, get_avatar_url
+from src.web.session import (
+    store_session,
+    clear_session as _clear_db_session,
+    restore_from_url_param,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,64 +43,14 @@ _settings = get_settings()
 # Initialize database schema on startup
 db.init_db()
 
+
 # ── Session helpers ────────────────────────────────────────────────────────
-
-
-def _generate_session_token() -> str:
-    """Generate a cryptographically random session token."""
-    return secrets.token_hex(24)  # 48 chars, 192 bits of entropy
-
-
-def _validate_session(company_id: int, token: str) -> bool:
-    """Validate a session token by checking it against the stored token in DB."""
-    company = db.get_company_by_id(company_id)
-    if not company:
-        return False
-    stored_token = company.get("session_token", "")
-    return bool(stored_token) and hmac.compare_digest(stored_token, token)
-
-
-def _store_session_token(company_id: int, token: str) -> None:
-    """Store a session token for a company in the database."""
-    ph = db._ph()
-    try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            f"UPDATE companies SET session_token = {ph}, updated_at = {ph} WHERE id = {ph}",
-            (
-                token,
-                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                company_id,
-            ),
-        )
-        conn.commit()
-        conn.close()
-    except Exception:
-        logger.exception("Failed to store session token")
-
-
-def _clear_session_token(company_id: int) -> None:
-    """Clear the stored session token from the database."""
-    ph = db._ph()
-    try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            f"UPDATE companies SET session_token = {ph}, updated_at = {ph} WHERE id = {ph}",
-            ("", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), company_id),
-        )
-        conn.commit()
-        conn.close()
-    except Exception:
-        logger.exception("Failed to clear session token")
 
 
 def _try_restore_session() -> bool:
     """
     Try to restore session from a one-time URL session token.
-    If valid, generates a NEW token (consuming the old one, rotates it).
-    Returns True if session was restored.
+    If valid, rotates the token. Returns True if session was restored.
     """
     session_param = st.query_params.get("session", None)
     if isinstance(session_param, list):
@@ -105,42 +58,26 @@ def _try_restore_session() -> bool:
     if not session_param:
         return False
 
-    try:
-        parts = session_param.split(":")
-        if len(parts) != 2:
-            return False
-        cid, token = int(parts[0]), parts[1]
-
-        if not _validate_session(cid, token):
-            return False
-
-        company = db.get_company_by_id(cid)
-        if not company:
-            return False
-
-        # Token is valid — rotate it (generate new one, store in DB)
-        new_token = _generate_session_token()
-        _store_session_token(cid, new_token)
-
-        st.session_state.company_id = cid
-        st.session_state.company_name = company.get("company_name", "")
-        st.session_state.discord_username = company.get("discord_username", "")
-        st.session_state.discord_avatar_url = company.get("discord_avatar", "")
-        st.session_state.session_token = new_token
-        st.session_state.is_admin = (
-            company.get("discord_id", "") in _settings.ADMIN_DISCORD_IDS
-        )
-        _is_active, _is_read_only = db.check_company_access(cid)
-        st.session_state.is_read_only = _is_read_only
-        st.session_state.is_active = _is_active
-
-        # Update URL with rotated token
-        st.query_params.clear()
-        st.query_params["session"] = f"{cid}:{new_token}"
-        return True
-    except (ValueError, IndexError):
+    session_data = restore_from_url_param(session_param)
+    if not session_data:
         st.query_params.clear()
         return False
+
+    st.session_state.company_id = session_data["company_id"]
+    st.session_state.company_name = session_data["company_name"]
+    st.session_state.discord_username = session_data["discord_username"]
+    st.session_state.discord_avatar_url = session_data["discord_avatar_url"]
+    st.session_state.session_token = session_data["session_token"]
+    st.session_state.is_admin = session_data["is_admin"]
+    st.session_state.is_read_only = session_data["is_read_only"]
+    st.session_state.is_active = session_data["is_active"]
+
+    # Update URL with rotated token
+    st.query_params.clear()
+    st.query_params["session"] = (
+        f"{session_data['company_id']}:{session_data['session_token']}"
+    )
+    return True
 
 
 def init_session_state() -> None:
@@ -181,7 +118,7 @@ def clear_session() -> None:
     # Clear the stored session token from DB so it can't be reused
     cid = st.session_state.get("company_id")
     if cid is not None:
-        _clear_session_token(cid)
+        _clear_db_session(cid)
     st.session_state.company_id = None
     st.session_state.company_name = ""
     st.session_state.discord_username = ""
@@ -321,9 +258,8 @@ def render_login_page() -> None:
                     company = None
 
                 if company:
-                    # Generate random session token and store in DB
-                    session_token = _generate_session_token()
-                    _store_session_token(company["id"], session_token)
+                    # Generate and store HMAC-signed session token
+                    session_token = store_session(company["id"])
 
                     # Set session state
                     st.session_state.company_id = company["id"]

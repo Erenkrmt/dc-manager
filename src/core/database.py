@@ -20,7 +20,9 @@ _settings = get_settings()
 _ALLOWED_STASH_COLUMNS = frozenset(
     {"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"}
 )
-_ALLOWED_COMPANY_COLUMNS = frozenset({"session_token", "tier", "public_stash_token"})
+_ALLOWED_COMPANY_COLUMNS = frozenset(
+    {"session_token", "session_created_at", "tier", "public_stash_token"}
+)
 
 logger = logging.getLogger(__name__)
 
@@ -708,6 +710,45 @@ def get_company_by_public_token(token: str) -> Optional[dict]:
     except Exception:
         logger.exception("Failed to look up company by public token")
         return None
+
+
+def cleanup_expired_sessions(max_age_seconds: int) -> int:
+    """
+    Remove (clear) session tokens that are older than `max_age_seconds` seconds.
+    Returns the number of sessions cleaned up.
+    """
+    ph = _ph()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if _USE_POSTGRES:
+            cursor.execute(
+                """UPDATE companies
+                   SET session_token = '', session_created_at = NULL, updated_at = %s
+                   WHERE session_token != ''
+                     AND session_created_at IS NOT NULL
+                     AND (EXTRACT(EPOCH FROM %s::timestamp) - EXTRACT(EPOCH FROM session_created_at::timestamp)) > %s""",
+                (now, now, max_age_seconds),
+            )
+        else:
+            cursor.execute(
+                """UPDATE companies
+                   SET session_token = '', session_created_at = NULL, updated_at = ?
+                   WHERE session_token != ''
+                     AND session_created_at IS NOT NULL
+                     AND (strftime('%%s', ?) - strftime('%%s', session_created_at)) > ?""",
+                (now, now, max_age_seconds),
+            )
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        if affected:
+            logger.info("Cleaned up %d expired session(s).", affected)
+        return affected
+    except Exception:
+        logger.exception("Failed to cleanup expired sessions")
+        return 0
 
 
 def generate_public_stash_token(company_id: int) -> Optional[str]:
