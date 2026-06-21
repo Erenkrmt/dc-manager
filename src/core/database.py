@@ -320,7 +320,7 @@ def _run_pg_migrations(cursor, conn) -> None:
         if cursor.fetchone() is None:
             cursor.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
             logger.debug("Migration: added %s column.", col)
-    for col in ["session_token", "tier", "public_stash_token"]:
+    for col in ["session_token", "session_created_at", "tier", "public_stash_token"]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in PG migration.", col)
             continue
@@ -352,12 +352,17 @@ def _run_sqlite_migrations(conn) -> None:
             logger.debug("Migration: added %s column.", col)
         except sqlite3.OperationalError:
             pass
-    for col in ["session_token", "tier", "public_stash_token"]:
+    for col in ["session_token", "session_created_at", "tier", "public_stash_token"]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in SQLite migration.", col)
             continue
         try:
-            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT ''")
+            if col == "session_created_at":
+                conn.execute(
+                    f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT NULL"
+                )
+            else:
+                conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT ''")
             conn.commit()
             logger.debug("Migration: added %s column to companies table.", col)
         except sqlite3.OperationalError:
