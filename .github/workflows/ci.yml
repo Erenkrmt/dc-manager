@@ -3,7 +3,7 @@
 #
 # Runs on:
 #   - pull_request (any branch)
-#   - push to master and feature/*
+#   - push to feature/*
 #   - workflow_call (reusable from docker-publish.yml)
 #
 # Does NOT push Docker images – only validates that the build works.
@@ -17,7 +17,6 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches:
-      - master
       - feature/*
   workflow_call:
 
