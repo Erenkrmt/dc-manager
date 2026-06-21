@@ -146,6 +146,13 @@ class Settings:
     STREAMLIT_PORT: int = int(os.getenv("STREAMLIT_PORT", "8501"))
     API_PORT: int = int(os.getenv("API_PORT", os.getenv("PORT", "8000")))
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
+    # Base URL for publicly-shareable links (e.g. public stash page).
+    # When running behind a reverse proxy or in Docker, set this to the
+    # externally-reachable URL, e.g. "https://fishy.business" or
+    # "http://192.168.1.100:8000".  If left empty, the share link falls
+    # back to "http://<API_HOST>:<API_PORT>/stash/public/<token>", which
+    # will not be reachable from outside the container.
+    PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "")
 
     # ── SSL / TLS ────────────────────────────────────────────────────────
     # Set SSL_ENABLED=true and point SSL_CERTFILE / SSL_KEYFILE to your

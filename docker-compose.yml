@@ -34,6 +34,8 @@ services:
       - ADMIN_DISCORD_IDS=${ADMIN_DISCORD_IDS:-}
       - TRIAL_DAYS=${TRIAL_DAYS:-3}
       - SESSION_SECRET=${SESSION_SECRET:-}
+      # Public stash share link base URL (set for Docker/reverse-proxy deployments)
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
       # SSL / TLS — mount certs volume externally and set paths
       - SSL_ENABLED=${SSL_ENABLED:-false}
       - SSL_CERTFILE=${SSL_CERTFILE:-}

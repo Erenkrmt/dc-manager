@@ -1525,9 +1525,19 @@ elif page == "📦 Stash Manager":
     _company = db.get_company_by_id(company_id)
     public_token = (_company or {}).get("public_stash_token", "")
     if public_token:
-        api_host = os.getenv("API_HOST", "localhost")
-        api_port = os.getenv("API_PORT", "8000")
-        public_url = f"http://{api_host}:{api_port}/stash/public/{public_token}"
+        base_url = _settings.PUBLIC_BASE_URL
+        if base_url:
+            public_url = f"{base_url.rstrip('/')}/stash/public/{public_token}"
+        else:
+            api_host = os.getenv("API_HOST", "localhost")
+            api_port = os.getenv("API_PORT", "8000")
+            public_url = f"http://{api_host}:{api_port}/stash/public/{public_token}"
+            st.warning(
+                "⚠️ **PUBLIC_BASE_URL** is not set. The link below may not be "
+                "reachable from outside this container. "
+                "Set `PUBLIC_BASE_URL` in your `.env` file to the externally-reachable "
+                "base URL (e.g. `PUBLIC_BASE_URL=https://fishy.business`)."
+            )
         st.success("✅ Public stash is enabled!")
         st.code(public_url, language="text")
         st.caption("Share this URL with customers. No API key needed.")
