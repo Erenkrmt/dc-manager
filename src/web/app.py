@@ -139,13 +139,19 @@ def check_read_only() -> None:
         )
 
 
-# ── API Background Thread ──────────────────────────────────────────────────
+# ── API Background Thread (once per process) ───────────────────────────────
+# ⚠️ CRITICAL: Streamlit re-executes this module on EVERY user interaction
+# (button click, rerun, page navigation). Without this guard, a NEW uvicorn
+# subprocess would be spawned on every rerun, causing port conflicts (port
+# 8000 already bound), orphaned processes, and the server appearing to
+# restart continuously.
 
 
 def _start_api_server():
-    """Start the FastAPI server in a background thread."""
+    """Start the FastAPI server in a background subprocess."""
     project_root = Path(__file__).resolve().parents[2]
     api_port = os.getenv("API_PORT", "8000")
+    logger.info("Starting FastAPI background server on port %s", api_port)
     try:
         subprocess.run(
             [
@@ -162,12 +168,19 @@ def _start_api_server():
             check=False,
         )
     except Exception:
-        pass
+        logger.exception("FastAPI background server exited")
 
 
-# Kick off the API server in a daemon thread
-api_thread = threading.Thread(target=_start_api_server, daemon=True)
-api_thread.start()
+# Guard: only start the API server thread ONCE per process lifetime.
+# We use a module-level flag because st.session_state is cleared on rerun
+# and would NOT prevent the duplicate spawns.
+if "_api_server_started" not in globals():
+    _api_server_started = False
+
+if not _api_server_started:
+    _api_server_started = True
+    api_thread = threading.Thread(target=_start_api_server, daemon=True)
+    api_thread.start()
 
 
 # ── Page Config ────────────────────────────────────────────────────────────
