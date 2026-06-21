@@ -259,6 +259,52 @@ class MarketDeal:
         db.save_cache(cache_data)
 
     # ------------------------------------------------------------------
+    # API request helper (shared by get_price and lookup_item)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _api_request(item_name: str) -> dict | None:
+        """
+        Make a retry-attempt API request to the DemocracyCraft chestshop
+        endpoint for *item_name*.  Returns the parsed JSON dict on success,
+        or ``None`` if all retries failed.
+        """
+        encoded_name = quote(item_name.strip(), safe="")
+        api_key = get_api_key()
+        url = (
+            f"https://api.democracycraft.net/economy/api/v1/chestshop/items/"
+            f"{encoded_name}?days={PRICE_DAYS_LOOKBACK}"
+        )
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        }
+
+        for attempt in range(1, API_RETRIES + 1):
+            try:
+                response = requests.get(url, headers=headers, timeout=API_TIMEOUT)
+                if response.status_code == 200:
+                    return response.json()
+
+                logger.warning(
+                    "API attempt %d/%d – Status %s",
+                    attempt,
+                    API_RETRIES,
+                    response.status_code,
+                )
+            except requests.RequestException as exc:
+                logger.warning(
+                    "API attempt %d/%d – Error: %s",
+                    attempt,
+                    API_RETRIES,
+                    exc,
+                )
+
+            if attempt < API_RETRIES:
+                time.sleep(API_RETRY_DELAY)
+
+        return None
+
+    # ------------------------------------------------------------------
     # Price fetching with retry logic
     # ------------------------------------------------------------------
     @staticmethod
@@ -277,60 +323,21 @@ class MarketDeal:
                 return entry["price"]
 
         logger.info("Fetching live price for '%s' …", item_name)
-        encoded_name = quote(item_name.strip(), safe="")
 
-        api_key = get_api_key()
-        url = (
-            f"https://api.democracycraft.net/economy/api/v1/chestshop/items/"
-            f"{encoded_name}?days={PRICE_DAYS_LOOKBACK}"
-        )
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-        }
-
+        data = MarketDeal._api_request(item_name)
         fetched_price: float | None = None
 
-        # Retry loop
-        for attempt in range(1, API_RETRIES + 1):
-            try:
-                response = requests.get(url, headers=headers, timeout=API_TIMEOUT)
-                if response.status_code == 200:
-                    data = response.json()
-                    avg = data.get("avgUnitPrice")
-                    if avg:
-                        fetched_price = float(avg)
-                        break
-
-                    shops = data.get("cheapestShops", [])
-                    if shops:
-                        prices = [
-                            float(s["buyPrice"])
-                            for s in shops
-                            if s.get("buyPrice") is not None
-                        ]
-                        if prices:
-                            fetched_price = min(prices)
-                            break
-
-                logger.warning(
-                    "API attempt %d/%d – Status %s",
-                    attempt,
-                    API_RETRIES,
-                    response.status_code,
-                )
-
-            except requests.RequestException as exc:
-                logger.warning(
-                    "API attempt %d/%d – Error: %s",
-                    attempt,
-                    API_RETRIES,
-                    exc,
-                )
-
-            # Wait before retrying (skip on the last attempt)
-            if attempt < API_RETRIES:
-                time.sleep(API_RETRY_DELAY)
+        if data:
+            avg = data.get("avgUnitPrice")
+            if avg:
+                fetched_price = float(avg)
+            else:
+                shops = data.get("cheapestShops", [])
+                prices = [
+                    float(s["buyPrice"]) for s in shops if s.get("buyPrice") is not None
+                ]
+                if prices:
+                    fetched_price = min(prices)
 
         # Fallback if every attempt failed
         if fetched_price is None:
@@ -408,6 +415,73 @@ class MarketDeal:
     # Item lookup (any item via API)
     # ------------------------------------------------------------------
     @staticmethod
+    def _parse_item_data(item_name: str, data: dict, cache: dict) -> dict:
+        """Parse API response data into a structured item lookup result dict."""
+        avg = data.get("avgUnitPrice")
+        shops = data.get("cheapestShops", [])
+        all_prices = [
+            float(s["buyPrice"]) for s in shops if s.get("buyPrice") is not None
+        ]
+
+        result = {
+            "item_name": item_name,
+            "avg_unit_price": float(avg) if avg else None,
+            "cheapest_shops": shops,
+            "total_trades": data.get("totalTrades", 0),
+            "all_prices": all_prices,
+            "min_price": min(all_prices) if all_prices else None,
+            "max_price": max(all_prices) if all_prices else None,
+            "shop_count": len(shops),
+            "cached": False,
+        }
+
+        if avg:
+            cache[item_name] = {
+                "price": float(avg),
+                "timestamp": time.time(),
+            }
+
+        logger.info(
+            "Item '%s' — avg: %s, shops: %d, trades: %s",
+            item_name,
+            f"${float(avg):.2f}" if avg else "N/A",
+            len(shops),
+            data.get("totalTrades", "N/A"),
+        )
+        return result
+
+    @staticmethod
+    def _make_fallback_result(item_name: str) -> dict:
+        """Return a fallback result dict when the API is unreachable."""
+        fallback_price = FALLBACK_PRICES.get(item_name, None)
+        if fallback_price is not None:
+            logger.warning("Using fallback price for '%s'.", item_name)
+            return {
+                "item_name": item_name,
+                "avg_unit_price": fallback_price,
+                "cheapest_shops": [],
+                "total_trades": 0,
+                "all_prices": [],
+                "min_price": fallback_price,
+                "max_price": fallback_price,
+                "shop_count": 0,
+                "cached": False,
+            }
+        logger.warning("No data available for '%s'.", item_name)
+        return {
+            "item_name": item_name,
+            "avg_unit_price": None,
+            "cheapest_shops": [],
+            "total_trades": 0,
+            "all_prices": [],
+            "min_price": None,
+            "max_price": None,
+            "shop_count": 0,
+            "cached": False,
+            "error": "No price data available for this item.",
+        }
+
+    @staticmethod
     def lookup_item(item_name: str, cache: dict) -> dict:
         """
         Look up an arbitrary item via the DemocracyCraft API.
@@ -429,107 +503,9 @@ class MarketDeal:
                 }
 
         logger.info("Looking up item '%s' …", item_name)
-        encoded_name = quote(item_name.strip(), safe="")
 
-        api_key = get_api_key()
-        url = (
-            f"https://api.democracycraft.net/economy/api/v1/chestshop/items/"
-            f"{encoded_name}?days={PRICE_DAYS_LOOKBACK}"
-        )
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-        }
+        data = MarketDeal._api_request(item_name)
+        if data:
+            return MarketDeal._parse_item_data(item_name, data, cache)
 
-        result: dict | None = None
-
-        for attempt in range(1, API_RETRIES + 1):
-            try:
-                response = requests.get(url, headers=headers, timeout=API_TIMEOUT)
-                if response.status_code == 200:
-                    data = response.json()
-                    avg = data.get("avgUnitPrice")
-                    shops = data.get("cheapestShops", [])
-                    all_prices = []
-                    for s in shops:
-                        if s.get("buyPrice") is not None:
-                            all_prices.append(float(s["buyPrice"]))
-
-                    result = {
-                        "item_name": item_name,
-                        "avg_unit_price": float(avg) if avg else None,
-                        "cheapest_shops": shops,
-                        "total_trades": data.get("totalTrades", 0),
-                        "all_prices": all_prices,
-                        "min_price": min(all_prices) if all_prices else None,
-                        "max_price": max(all_prices) if all_prices else None,
-                        "shop_count": len(shops),
-                        "cached": False,
-                    }
-
-                    # Cache the avg price for future quick lookups
-                    if avg:
-                        cache[item_name] = {
-                            "price": float(avg),
-                            "timestamp": current_time,
-                        }
-
-                    logger.info(
-                        "Item '%s' — avg: %s, shops: %d, trades: %s",
-                        item_name,
-                        f"${float(avg):.2f}" if avg else "N/A",
-                        len(shops),
-                        data.get("totalTrades", "N/A"),
-                    )
-                    break
-
-                logger.warning(
-                    "API attempt %d/%d – Status %s",
-                    attempt,
-                    API_RETRIES,
-                    response.status_code,
-                )
-
-            except requests.RequestException as exc:
-                logger.warning(
-                    "API attempt %d/%d – Error: %s",
-                    attempt,
-                    API_RETRIES,
-                    exc,
-                )
-
-            if attempt < API_RETRIES:
-                time.sleep(API_RETRY_DELAY)
-
-        # Fallback
-        if result is None:
-            fallback_price = FALLBACK_PRICES.get(item_name, None)
-            if fallback_price is not None:
-                logger.warning("Using fallback price for '%s'.", item_name)
-                result = {
-                    "item_name": item_name,
-                    "avg_unit_price": fallback_price,
-                    "cheapest_shops": [],
-                    "total_trades": 0,
-                    "all_prices": [],
-                    "min_price": fallback_price,
-                    "max_price": fallback_price,
-                    "shop_count": 0,
-                    "cached": False,
-                }
-            else:
-                logger.warning("No data available for '%s'.", item_name)
-                result = {
-                    "item_name": item_name,
-                    "avg_unit_price": None,
-                    "cheapest_shops": [],
-                    "total_trades": 0,
-                    "all_prices": [],
-                    "min_price": None,
-                    "max_price": None,
-                    "shop_count": 0,
-                    "cached": False,
-                    "error": "No price data available for this item.",
-                }
-
-        return result
+        return MarketDeal._make_fallback_result(item_name)

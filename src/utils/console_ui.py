@@ -1,19 +1,37 @@
 # src/utils/console_ui.py
-import os
-import json
+"""
+Main CLI loop for the DemocracyCraft Trading Toolbox.
+
+Routes to the four interactive modes and handles the top-level menu.
+Session state (company_id, read-only flag) is managed via a
+:class:`SessionContext` dataclass imported from :mod:`src.utils.session`.
+"""
+
+from __future__ import annotations
+
 import logging
-from pathlib import Path
 
 from src.core.market_deal import (
     MarketDeal,
     analyze_deal,
-    stash_ingot_equivalents,
     format_subtract_result,
     handle_stash_subtraction,
     fetch_live_prices,
 )
 from src.core.settings import get_settings
 from src.core import database as db
+from src.utils.input_helpers import (
+    safe_int_input,
+    safe_float_input,
+    input_unit,
+    clear_screen,
+    press_enter_to_continue,
+)
+from src.utils.session import SessionContext, resolve_company
+from src.utils.stash_helpers import (
+    load_materials_from_stash,
+    prompt_material_values_manual,
+)
 
 _settings = get_settings()
 ITEMS_PER_STACK = _settings.ITEMS_PER_STACK
@@ -24,76 +42,24 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------------------
-def clear_screen() -> None:
-    """Clear the terminal screen (cross-platform)."""
-    os.system("cls" if os.name == "nt" else "clear")
-
-
-def press_enter_to_continue() -> None:
-    """Prompt the user to press Enter before continuing."""
-    input("\nPress Enter to continue...")
-
-
-# ---------------------------------------------------------------------------
-# Input helpers
-# ---------------------------------------------------------------------------
-def safe_float_input(prompt: str, default: float = 0.0) -> float:
-    """Read a float from stdin; return *default* on empty or invalid input."""
-    try:
-        val = input(prompt).strip()
-        if val == "":
-            return default
-        return float(val)
-    except ValueError:
-        logger.warning("Invalid number input – using %s.", default)
-        return default
-
-
-def safe_int_input(prompt: str, default: int = 0) -> int:
-    """Read an int from stdin; return *default* on empty or invalid input."""
-    try:
-        val = input(prompt).strip()
-        if val == "":
-            return default
-        return int(val)
-    except ValueError:
-        logger.warning("Invalid number input – using %s.", default)
-        return default
-
-
-def input_unit(name: str, amount: float) -> str:
-    """
-    Prompt the user for a unit (block/ingot/nugget) for *name*.
-    Returns 'ingot' if amount is zero or the input is unrecognised.
-    """
-    if amount <= 0:
-        return "ingot"
-    unit = input(f"  -> Unit for {name} (block/ingot/nugget): ").strip().lower()
-    if unit not in ("block", "ingot", "nugget"):
-        logger.info("Unknown unit '%s' – defaulting to 'ingot'.", unit)
-        return "ingot"
-    return unit
-
-
-# ---------------------------------------------------------------------------
 # Stash subtraction helper (shared by Mode 1 and Mode 2)
 # ---------------------------------------------------------------------------
 def _offer_stash_subtraction(
-    iron_ingots: int, gold_ingots: int, diamond_items: int, used_stash: bool = False
+    ctx: SessionContext,
+    iron_ingots: int,
+    gold_ingots: int,
+    diamond_items: int,
+    used_stash: bool = False,
 ) -> None:
     """
     After a deal, offer to subtract materials from stash.
     If auto-subtract is ON, do it silently. Otherwise ask.
     """
-    global _COMPANY_ID
-
     result = handle_stash_subtraction(
         iron_ingots,
         gold_ingots,
         diamond_items,
-        company_id=_COMPANY_ID,
+        company_id=ctx.company_id,
     )
     if result is None:
         return
@@ -113,7 +79,7 @@ def _offer_stash_subtraction(
 
         if choice == "y":
             result = db.subtract_from_stash(
-                iron_ingots, gold_ingots, diamond_items, company_id=_COMPANY_ID
+                iron_ingots, gold_ingots, diamond_items, company_id=ctx.company_id
             )
             formatted = format_subtract_result(result)
             if formatted:
@@ -127,25 +93,36 @@ def _offer_stash_subtraction(
         print(f"📦 Auto-subtracted from stash: {formatted}")
 
 
+def _get_material_count(name: str, is_block: bool) -> int:
+    """Read full stacks and remainder for a material from the user."""
+    type_str = "BLOCKS" if is_block else "INGOTS/ITEMS"
+    full_stacks = safe_int_input(f"  -> Full stacks (64) {name}-{type_str}: ")
+    rest = safe_int_input(
+        f"     Partial remainder stack (0-63) {name}-{type_str}: ",
+    )
+    total = (full_stacks * ITEMS_PER_STACK) + rest
+    return total * INGOTS_PER_BLOCK if is_block else total
+
+
 # ---------------------------------------------------------------------------
 # Mode 1 – Deal Calculator
 # ---------------------------------------------------------------------------
-def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) -> None:
+def deal_calculator(
+    ctx: SessionContext,
+    price_iron: float,
+    price_gold: float,
+    price_diamond: float,
+) -> None:
     """Interactive deal calculator – user enters raw material amounts and units."""
     print("\n--- 💰 DEAL CALCULATOR ---")
 
-    # Option to load from stash
-    iron_amount, iron_unit = 0.0, "ingot"
-    gold_amount, gold_unit = 0.0, "ingot"
-    diamond_amount, diamond_unit = 0.0, "ingot"
     used_stash = False
-
     load_stash_choice = input("\nLoad values from stash? (y/n): ").strip().lower()
     if load_stash_choice == "y":
-        stash = db.load_stash(company_id=_COMPANY_ID)
-        if stash and stash.get("updated_at") != "never":
-            used_stash = True
-            total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
+        total_iron, total_gold, total_diamond, used_stash = load_materials_from_stash(
+            ctx
+        )
+        if used_stash:
             print("\n📦 Loaded from stash:")
             print(f"   Iron:     {MarketDeal.format_bulk_storage(total_iron)}")
             print(f"   Gold:     {MarketDeal.format_bulk_storage(total_gold)}")
@@ -159,8 +136,9 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
             if override_iron > 0:
                 iron_amount = override_iron
                 iron_unit = input_unit("Iron (override)", iron_amount)
+                iron_ingots = MarketDeal.convert_to_ingots(iron_amount, iron_unit)
             else:
-                iron_amount = float(total_iron)
+                iron_ingots = float(total_iron)
 
             override_gold = safe_float_input(
                 "Override gold amount (leave empty to keep): "
@@ -168,8 +146,9 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
             if override_gold > 0:
                 gold_amount = override_gold
                 gold_unit = input_unit("Gold (override)", gold_amount)
+                gold_ingots = MarketDeal.convert_to_ingots(gold_amount, gold_unit)
             else:
-                gold_amount = float(total_gold)
+                gold_ingots = float(total_gold)
 
             override_diamond = safe_float_input(
                 "Override diamond amount (leave empty to keep): "
@@ -177,29 +156,18 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
             if override_diamond > 0:
                 diamond_amount = override_diamond
                 diamond_unit = input_unit("Diamond (override)", diamond_amount)
+                diamond_items = MarketDeal.convert_to_ingots(
+                    diamond_amount, diamond_unit
+                )
             else:
-                diamond_amount = float(total_diamond)
+                diamond_items = float(total_diamond)
         else:
-            print("⚠ No stash found. Please enter values manually.")
-            iron_amount = safe_float_input("\nIron amount (0 if none): ")
-            iron_unit = input_unit("Iron", iron_amount)
-            gold_amount = safe_float_input("Gold amount (0 if none): ")
-            gold_unit = input_unit("Gold", gold_amount)
-            diamond_amount = safe_float_input("Diamond amount (0 if none): ")
-            diamond_unit = input_unit("Diamond", diamond_amount)
+            iron_ingots, gold_ingots, diamond_items = prompt_material_values_manual()
     else:
-        iron_amount = safe_float_input("\nIron amount (0 if none): ")
-        iron_unit = input_unit("Iron", iron_amount)
-        gold_amount = safe_float_input("Gold amount (0 if none): ")
-        gold_unit = input_unit("Gold", gold_amount)
-        diamond_amount = safe_float_input("Diamond amount (0 if none): ")
-        diamond_unit = input_unit("Diamond", diamond_amount)
-
-    iron_ingots = MarketDeal.convert_to_ingots(iron_amount, iron_unit)
-    gold_ingots = MarketDeal.convert_to_ingots(gold_amount, gold_unit)
-    diamond_items = MarketDeal.convert_to_ingots(diamond_amount, diamond_unit)
+        iron_ingots, gold_ingots, diamond_items = prompt_material_values_manual()
 
     _calculate_and_show_result(
+        ctx,
         iron_ingots,
         gold_ingots,
         diamond_items,
@@ -208,31 +176,25 @@ def deal_calculator(price_iron: float, price_gold: float, price_diamond: float) 
         price_diamond,
     )
 
-    # Offer stash subtraction
     _offer_stash_subtraction(
-        int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash
+        ctx, int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash
     )
 
 
 # ---------------------------------------------------------------------------
 # Mode 2 – Shulker Scanner
 # ---------------------------------------------------------------------------
-def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) -> None:
+def shulker_scanner(
+    ctx: SessionContext,
+    price_iron: float,
+    price_gold: float,
+    price_diamond: float,
+) -> None:
     """
     Interactive shulker-box scanner.
     User enters full stacks + remainder for blocks and items of each material.
     """
     print("\n--- 📦 QUICK SHULKER BOX SCANNER ---")
-
-    def get_material_count(name: str, is_block: bool) -> int:
-        """Read full stacks and remainder for a material from the user."""
-        type_str = "BLOCKS" if is_block else "INGOTS/ITEMS"
-        full_stacks = safe_int_input(f"  -> Full stacks (64) {name}-{type_str}: ")
-        rest = safe_int_input(
-            f"     Partial remainder stack (0-63) {name}-{type_str}: ",
-        )
-        total = (full_stacks * ITEMS_PER_STACK) + rest
-        return total * INGOTS_PER_BLOCK if is_block else total
 
     total_diamond = 0
     total_iron = 0
@@ -241,83 +203,34 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
 
     load_stash_choice = input("\nLoad values from stash? (y/n): ").strip().lower()
     if load_stash_choice == "y":
-        stash = db.load_stash(company_id=_COMPANY_ID)
-        total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
-        if (
-            stash
-            and stash.get("updated_at") != "never"
-            and (total_iron or total_gold or total_diamond)
-        ):
-            used_stash = True
-            print("\n📦 Loaded from stash (you can override individual values):")
-
-            # Helper: ask override for a value, keep stash if empty
-            def _override_val(prompt: str, stash_val: int) -> int:
-                raw = input(prompt).strip()
-                if raw == "":
-                    return stash_val
-                try:
-                    return int(raw)
-                except ValueError:
-                    return stash_val
-
-            # Diamond
-            di_blocks_count = stash["diamond_blocks"]
-            di_items_count = stash["diamond_items"]
-            print(f"\n💎 DIAMONDS: {di_blocks_count} blocks, {di_items_count} items")
-            print(
-                "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
-            )
-            di_blocks_count = _override_val("   Diamond blocks: ", di_blocks_count)
-            di_items_count = _override_val("   Diamond items:  ", di_items_count)
-            total_diamond = di_blocks_count * INGOTS_PER_BLOCK + di_items_count
-
-            # Iron
-            ir_blocks_count = stash["iron_blocks"]
-            ir_items_count = stash["iron_ingots"]
-            print(f"\n⬜ IRON: {ir_blocks_count} blocks, {ir_items_count} ingots")
-            print(
-                "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
-            )
-            ir_blocks_count = _override_val("   Iron blocks: ", ir_blocks_count)
-            ir_items_count = _override_val("   Iron ingots: ", ir_items_count)
-            total_iron = ir_blocks_count * INGOTS_PER_BLOCK + ir_items_count
-
-            # Gold
-            go_blocks_count = stash["gold_blocks"]
-            go_items_count = stash["gold_ingots"]
-            print(f"\n🟨 GOLD: {go_blocks_count} blocks, {go_items_count} ingots")
-            print(
-                "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
-            )
-            go_blocks_count = _override_val("   Gold blocks: ", go_blocks_count)
-            go_items_count = _override_val("   Gold ingots: ", go_items_count)
-            total_gold = go_blocks_count * INGOTS_PER_BLOCK + go_items_count
-        else:
+        total_iron, total_gold, total_diamond, used_stash = load_materials_from_stash(
+            ctx
+        )
+        if not used_stash:
             print("⚠ No stash found. Please enter values manually.")
             print("\n💎 DIAMONDS:")
-            total_diamond = get_material_count(
+            total_diamond = _get_material_count(
                 "DIAMOND", is_block=True
-            ) + get_material_count("DIAMOND", is_block=False)
+            ) + _get_material_count("DIAMOND", is_block=False)
             print("\n⬜ IRON:")
-            total_iron = get_material_count("IRON", is_block=True) + get_material_count(
-                "IRON", is_block=False
-            )
+            total_iron = _get_material_count(
+                "IRON", is_block=True
+            ) + _get_material_count("IRON", is_block=False)
             print("\n🟨 GOLD:")
-            total_gold = get_material_count("GOLD", is_block=True) + get_material_count(
-                "GOLD", is_block=False
-            )
+            total_gold = _get_material_count(
+                "GOLD", is_block=True
+            ) + _get_material_count("GOLD", is_block=False)
     else:
         print("\n💎 DIAMONDS:")
-        total_diamond = get_material_count(
+        total_diamond = _get_material_count(
             "DIAMOND", is_block=True
-        ) + get_material_count("DIAMOND", is_block=False)
+        ) + _get_material_count("DIAMOND", is_block=False)
         print("\n⬜ IRON:")
-        total_iron = get_material_count("IRON", is_block=True) + get_material_count(
+        total_iron = _get_material_count("IRON", is_block=True) + _get_material_count(
             "IRON", is_block=False
         )
         print("\n🟨 GOLD:")
-        total_gold = get_material_count("GOLD", is_block=True) + get_material_count(
+        total_gold = _get_material_count("GOLD", is_block=True) + _get_material_count(
             "GOLD", is_block=False
         )
 
@@ -331,6 +244,7 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
     diamond_items = total_diamond * multiplier
 
     _calculate_and_show_result(
+        ctx,
         iron_ingots,
         gold_ingots,
         diamond_items,
@@ -339,9 +253,8 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
         price_diamond,
     )
 
-    # Offer stash subtraction
     _offer_stash_subtraction(
-        int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash
+        ctx, int(iron_ingots), int(gold_ingots), int(diamond_items), used_stash
     )
 
 
@@ -349,6 +262,7 @@ def shulker_scanner(price_iron: float, price_gold: float, price_diamond: float) 
 # Core calculation & result display (shared by Mode 1 and Mode 2)
 # ---------------------------------------------------------------------------
 def _calculate_and_show_result(
+    ctx: SessionContext,
     iron_ingots: float,
     gold_ingots: float,
     diamond_items: float,
@@ -358,10 +272,8 @@ def _calculate_and_show_result(
 ) -> None:
     """
     Compute the market value, compare against the user's offered price,
-    display the result, and log the deal to CSV.
+    display the result, and log the deal to the database.
     """
-
-    # Intermediate summary before asking offered price
     total_market_value = (
         (iron_ingots * price_iron)
         + (gold_ingots * price_gold)
@@ -378,7 +290,6 @@ def _calculate_and_show_result(
         "\nWhat is the buyer offering for these goods? ($): "
     )
 
-    # Use the shared analyze_deal function
     result = analyze_deal(
         iron_ingots,
         gold_ingots,
@@ -389,7 +300,6 @@ def _calculate_and_show_result(
         offered_price=offered_price,
     )
 
-    # Output
     print("\n" + "=" * 60)
     print(
         f"PROJECT: Bulk Trading Analyzer v3.1 (Live Price Check)\n"
@@ -411,16 +321,19 @@ def _calculate_and_show_result(
 
     if result["stacks"] > 0:
         print(
-            f"📊 Margin:          {result['profit_loss'] / result['stacks']:.2f}$ per stack | {result['profit_loss'] / result['shulkers']:.2f}$ per shulker"
+            f"📊 Margin:          {result['profit_loss'] / result['stacks']:.2f}$ per stack | "
+            f"{result['profit_loss'] / result['shulkers']:.2f}$ per shulker"
         )
 
     print("\n== FINANCIAL CHECK ==")
     print(f"Market value:    {result['market_value']:.2f}$")
     print(
-        f"Offered price:   {result['offered_price']:.2f}$ ({result['percent_of_market']:.1f}% of market)"
+        f"Offered price:   {result['offered_price']:.2f}$ "
+        f"({result['percent_of_market']:.1f}% of market)"
     )
     print(
-        f"Your limit ({MarketDeal.MIN_ACCEPTABLE_PERCENT * 100:.0f}%): {result['min_needed_price']:.2f}$"
+        f"Your limit ({MarketDeal.MIN_ACCEPTABLE_PERCENT * 100:.0f}%): "
+        f"{result['min_needed_price']:.2f}$"
     )
     print("-" * 40)
     print(f"{result['status_emoji']} {result['status']}")
@@ -448,7 +361,8 @@ def _calculate_and_show_result(
                 )
             if result["diamond_items"] > 0:
                 print(
-                    f" -> Diamonds:  {MarketDeal.format_bulk_storage(counter['diamond'], is_diamond=True)} (unchanged)"
+                    f" -> Diamonds:  {MarketDeal.format_bulk_storage(counter['diamond'], is_diamond=True)} "
+                    f"(unchanged)"
                 )
 
     MarketDeal.log_deal(
@@ -461,7 +375,7 @@ def _calculate_and_show_result(
         price_iron,
         price_gold,
         price_diamond,
-        company_id=_COMPANY_ID,
+        company_id=ctx.company_id,
     )
     print(f"\n💾 Deal saved to database ({_settings.DB_FILE}).")
     print("=" * 60)
@@ -494,7 +408,6 @@ def quick_converter(
     rest_items = amount % ITEMS_PER_STACK
     shulkers = amount / ITEMS_PER_SHULKER
 
-    # Estimate market value in each material for context
     iron_value = amount * price_iron
     gold_value = amount * price_gold
     diamond_value = amount * price_diamond
@@ -517,15 +430,20 @@ def quick_converter(
 # ---------------------------------------------------------------------------
 # Mode 4 – Stash Manager
 # ---------------------------------------------------------------------------
-def stash_manager(price_iron: float, price_gold: float, price_diamond: float) -> None:
+def stash_manager(
+    ctx: SessionContext,
+    price_iron: float,
+    price_gold: float,
+    price_diamond: float,
+) -> None:
     """Manage the saved inventory stash."""
     while True:
         clear_screen()
         print("=" * 50)
         print("     📦 STASH MANAGER")
         print("=" * 50)
-        stash = db.load_stash(company_id=_COMPANY_ID)
-        # Calculate ingot totals for display
+        stash = ctx.load_stash()
+
         total_iron = stash.get("iron_blocks", 0) * INGOTS_PER_BLOCK + stash.get(
             "iron_ingots", 0
         )
@@ -536,7 +454,6 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
             "diamond_items", 0
         )
 
-        # Market value
         iron_value = total_iron * price_iron
         gold_value = total_gold * price_gold
         diamond_value = total_diamond * price_diamond
@@ -545,7 +462,7 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
         stacks = (total_iron + total_gold + total_diamond) / float(ITEMS_PER_STACK)
         shulkers = (total_iron + total_gold + total_diamond) / float(ITEMS_PER_SHULKER)
 
-        auto_sub = bool(stash.get("auto_subtract", 0))
+        auto_sub = ctx.stash_auto_subtract()
 
         print(f"\n📦 CURRENT STASH (last updated: {stash.get('updated_at', 'never')})")
         print("-" * 40)
@@ -597,7 +514,7 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
                 "diamond_items": diamond_items,
                 "auto_subtract": 1 if auto_sub else 0,
             }
-            db.save_stash(new_stash, company_id=_COMPANY_ID)
+            ctx.save_stash(new_stash)
             print("\n✅ Stash updated!")
 
         elif choice == "2":
@@ -607,13 +524,13 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
                 .lower()
             )
             if confirm == "y":
-                db.clear_stash(company_id=_COMPANY_ID)
+                ctx.clear_stash()
                 print("\n✅ Stash cleared!")
             else:
                 print("\n⏩ Canceled.")
 
         elif choice == "3":
-            db.set_auto_subtract(not auto_sub, company_id=_COMPANY_ID)
+            ctx.set_auto_subtract(not auto_sub)
             print(f"\nAuto-subtract is now {'ON ✅' if not auto_sub else 'OFF ❌'}")
 
         elif choice == "4":
@@ -625,91 +542,17 @@ def stash_manager(price_iron: float, price_gold: float, price_diamond: float) ->
             press_enter_to_continue()
 
 
-# ── CLI Config (API key persistence) ──────────────────────────────────────
-
-_CONFIG_FILE = Path.home() / ".dc_trade_config"
-
-
-def _load_config() -> dict:
-    """Load CLI config from ~/.dc_trade_config."""
-    try:
-        if _CONFIG_FILE.exists():
-            return json.loads(_CONFIG_FILE.read_text())
-    except (json.JSONDecodeError, OSError):
-        pass
-    return {}
-
-
-def _save_config(config: dict) -> None:
-    """Save CLI config to ~/.dc_trade_config with restricted permissions."""
-    try:
-        _CONFIG_FILE.write_text(json.dumps(config, indent=2))
-        os.chmod(_CONFIG_FILE, 0o600)
-    except OSError as exc:
-        logger.warning("Could not save config: %s", exc)
-
-
-def _resolve_company() -> int | None:
-    """
-    Prompt for API key (or load from config), validate, set company_id.
-    Returns company_id or None if not authenticated.
-    Also sets is_read_only state.
-    """
-    config = _load_config()
-    api_key = config.get("api_key", "")
-
-    if not api_key:
-        print("\n🔑 Enter your API key to authenticate with the server.")
-        print("  (Get your key from the web UI → My API Key)")
-        api_key = input("API Key: ").strip()
-
-    company = db.get_company_by_api_key(api_key)
-    if not company:
-        print("\n❌ Invalid API key. Please check your key and try again.")
-        return None
-
-    # Save to config for next time
-    config["api_key"] = api_key
-    _save_config(config)
-
-    global _COMPANY_ID, _IS_READ_ONLY
-    _COMPANY_ID = company["id"]
-    is_active, is_read_only = db.check_company_access(_COMPANY_ID)
-    _IS_READ_ONLY = is_read_only
-
-    if not is_active:
-        print("\n❌ Your account is inactive. Contact the admin.")
-        return None
-
-    print(
-        f"\n✅ Authenticated as {company.get('discord_username', company.get('company_name', 'User'))}"
-    )
-    if _IS_READ_ONLY:
-        print(
-            "⚠️  **Read-only mode** — your access has expired. Contact Fishy Business to renew."
-        )
-    return _COMPANY_ID
-
-
-# Global state for CLI sessions
-_COMPANY_ID: int = 1
-_IS_READ_ONLY: bool = False
-
-
 # ---------------------------------------------------------------------------
 # Main menu & navigation loop
 # ---------------------------------------------------------------------------
 def main_loop() -> None:
     """Display the main menu and route to the selected mode. Loops until the user quits."""
-
-    global _COMPANY_ID, _IS_READ_ONLY
-
-    # Authenticate on startup
-    if _resolve_company() is None:
+    ctx = resolve_company()
+    if ctx is None:
         press_enter_to_continue()
         return
 
-    if _IS_READ_ONLY:
+    if ctx.is_read_only:
         print("\n⚠️  Running in READ-ONLY mode. You can view data but cannot modify.")
 
     while True:
@@ -721,7 +564,7 @@ def main_loop() -> None:
         print("  [2] Shulker Box Scanner (enter FULL STACKS)")
         print("  [3] Quick Converter (split desired amounts)")
         print("  [4] 📦 Stash Manager (saved inventory)")
-        if _IS_READ_ONLY:
+        if ctx.is_read_only:
             print("     ⚠️  READ-ONLY MODE")
         print("  [5] ❌ Exit")
         choice = input("  Choice (1/2/3/4/5): ").strip()
@@ -730,7 +573,6 @@ def main_loop() -> None:
             print("\nGoodbye! 👋")
             break
 
-        # Fetch / refresh prices for all modes that need them
         if choice in ("1", "2", "3", "4"):
             print("\n⏳ Loading current prices ...")
             price_iron, price_gold, price_diamond, _ = fetch_live_prices()
@@ -741,12 +583,12 @@ def main_loop() -> None:
             continue
 
         if choice == "1":
-            deal_calculator(price_iron, price_gold, price_diamond)
+            deal_calculator(ctx, price_iron, price_gold, price_diamond)
         elif choice == "2":
-            shulker_scanner(price_iron, price_gold, price_diamond)
+            shulker_scanner(ctx, price_iron, price_gold, price_diamond)
         elif choice == "3":
             quick_converter(price_iron, price_gold, price_diamond)
         elif choice == "4":
-            stash_manager(price_iron, price_gold, price_diamond)
+            stash_manager(ctx, price_iron, price_gold, price_diamond)
 
         press_enter_to_continue()

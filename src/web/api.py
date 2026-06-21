@@ -585,4 +585,5 @@ def run() -> None:
     """Run the API server with uvicorn."""
     import uvicorn
 
-    uvicorn.run("src.web.api:app", host="0.0.0.0", port=8000, reload=True)  # nosec - S8392: required for Docker container access; container network namespace provides isolation.
+    host = os.environ.get("API_HOST", "127.0.0.1")
+    uvicorn.run("src.web.api:app", host=host, port=8000, reload=True)
