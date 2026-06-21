@@ -511,6 +511,22 @@ def get_stash_public(api_key: AuthDep) -> str:
 
 
 @app.get(
+    "/stash/public/static/{rest:path}",
+    include_in_schema=False,
+)
+def stash_public_static_files(rest: str) -> dict:
+    """
+    Catch requests to /stash/public/static/... paths.
+    These are likely stale service worker cache requests (from Streamlit or browser
+    extensions) that get routed here because /stash/public/{token} catches them.
+    Return a proper 404 so the browser doesn't error on MIME type mismatch.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse("Not Found", status_code=404)
+
+
+@app.get(
     "/stash/public/{token}",
     response_class=HTMLResponse,
     responses={404: {"description": "Invalid or inactive public stash token"}},
@@ -520,6 +536,11 @@ def get_stash_public_by_token(token: str) -> str:
     Return a public, read-only HTML page showing a company's stash via public token.
     No API key required — share this URL with customers.
     """
+    # Reject tokens with slashes — they're subpath requests (e.g. static files)
+    if "/" in token:
+        raise HTTPException(
+            status_code=404, detail="Invalid public stash token"
+        )
     company = db.get_company_by_public_token(token)
     if not company:
         raise HTTPException(
