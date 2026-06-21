@@ -449,7 +449,7 @@ def get_or_create_company_by_discord(
 
         # 1. Check if user already has a membership
         cursor.execute(
-            f"""SELECT cm.*, c.company_name, c.access_expires_at, c.is_active, c.tier, c.api_key, c.invite_code
+            f"""SELECT cm.*, c.company_name, c.access_expires_at, c.is_active, c.tier, c.trial_used, c.api_key, c.invite_code
                 FROM company_members cm
                 JOIN companies c ON c.id = cm.company_id
                 WHERE cm.discord_id = {ph}
@@ -473,6 +473,7 @@ def get_or_create_company_by_discord(
                 "access_expires_at": row["access_expires_at"],
                 "is_active": row["is_active"],
                 "tier": row["tier"],
+                "trial_used": row.get("trial_used", 0),
                 "api_key": "",
                 "invite_code": row.get("invite_code", ""),
             }
@@ -530,6 +531,7 @@ def get_or_create_company_by_discord(
             "access_expires_at": trial_end,
             "is_active": True,
             "tier": "free",
+            "trial_used": 1,
             "api_key": raw_api_key,
             "invite_code": invite_code,
         }
