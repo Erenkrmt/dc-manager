@@ -142,7 +142,6 @@ def store_session(member_id: int) -> str:
     Also records ``session_created_at`` for cleanup sweeps.
     """
     ph = db._ph()
-    now_ts = time.time()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # Look up the member's company_id
