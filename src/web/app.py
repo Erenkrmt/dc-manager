@@ -416,6 +416,7 @@ def render_login_page() -> None:
                         st.session_state.discord_avatar_url,
                     )
                     if member:
+                        st.session_state.user_companies = db.get_user_companies(st.session_state.discord_id)
                         st.success("✅ You've been added to a new company! Select it above.")
                         st.rerun()
                     else:
