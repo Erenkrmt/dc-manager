@@ -27,7 +27,7 @@ from src.utils.input_helpers import (
     clear_screen,
     press_enter_to_continue,
 )
-from src.utils.session import SessionContext, resolve_company
+from src.utils.cli_auth import SessionContext, resolve_company
 from src.utils.stash_helpers import (
     load_materials_from_stash,
     prompt_material_values_manual,

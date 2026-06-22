@@ -6,7 +6,7 @@ import logging
 
 from src.core.market_deal import MarketDeal, stash_ingot_equivalents
 from src.utils.input_helpers import safe_float_input, input_unit
-from src.utils.session import SessionContext
+from src.utils.cli_auth import SessionContext
 
 logger = logging.getLogger(__name__)
 
