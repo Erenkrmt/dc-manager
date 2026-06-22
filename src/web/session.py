@@ -34,9 +34,7 @@ _settings = get_settings()
 
 # ── Derived config ──────────────────────────────────────────────────────────
 
-_SESSION_SECRET: str = (
-    _settings.SESSION_SECRET or secrets.token_hex(32)
-)
+_SESSION_SECRET: str = _settings.SESSION_SECRET or secrets.token_hex(32)
 """If no SESSION_SECRET is configured, generate one per process.
 This means sessions are invalidated on server restart — but that's fine
 for dev. In production, set a fixed SESSION_SECRET in .env."""
@@ -68,9 +66,7 @@ def _decode_token(token: str) -> Optional[dict]:
 def _sign_payload(payload: dict) -> str:
     """Return an HMAC-SHA256 hex signature for *payload*."""
     raw = json.dumps(payload, separators=(",", ":")).encode()
-    return hmac.new(
-        _SESSION_SECRET.encode(), raw, hashlib.sha256
-    ).hexdigest()
+    return hmac.new(_SESSION_SECRET.encode(), raw, hashlib.sha256).hexdigest()
 
 
 def _verify_signature(payload: dict, signature: str) -> bool:

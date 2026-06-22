@@ -195,7 +195,9 @@ class TestValidateSession:
         store_session(member_id)
         # Generate a token with negative max_age so it's immediately expired
         with patch.object(sess_module, "_MAX_AGE", -1):
-            expired_token = generate_session_token(member_id=member_id, company_id=company_id)
+            expired_token = generate_session_token(
+                member_id=member_id, company_id=company_id
+            )
 
         # Token should fail parsing (expired)
         assert parse_session_token(expired_token) is None

@@ -538,9 +538,7 @@ def get_stash_public_by_token(token: str) -> str:
     """
     # Reject tokens with slashes — they're subpath requests (e.g. static files)
     if "/" in token:
-        raise HTTPException(
-            status_code=404, detail="Invalid public stash token"
-        )
+        raise HTTPException(status_code=404, detail="Invalid public stash token")
     company = db.get_company_by_public_token(token)
     if not company:
         raise HTTPException(

@@ -346,7 +346,13 @@ def _run_pg_migrations(cursor, conn) -> None:
         if cursor.fetchone() is None:
             cursor.execute(f"ALTER TABLE stash ADD COLUMN {col} INTEGER DEFAULT 0")
             logger.debug("Migration: added %s column.", col)
-    for col in ["session_token", "session_created_at", "tier", "public_stash_token", "invite_code"]:
+    for col in [
+        "session_token",
+        "session_created_at",
+        "tier",
+        "public_stash_token",
+        "invite_code",
+    ]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in PG migration.", col)
             continue
@@ -357,7 +363,9 @@ def _run_pg_migrations(cursor, conn) -> None:
         )
         if cursor.fetchone() is None:
             default_val = (
-                "''" if col in ("session_token", "public_stash_token", "invite_code") else "'free'"
+                "''"
+                if col in ("session_token", "public_stash_token", "invite_code")
+                else "'free'"
             )
             cursor.execute(
                 f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}"
@@ -377,7 +385,7 @@ def _run_pg_migrations(cursor, conn) -> None:
 
 def _drop_legacy_company_columns(cursor, conn) -> None:
     """Drop legacy columns from companies table that moved to company_members.
-    
+
     These columns (discord_id, discord_username, discord_avatar) were part of
     migration 002 but are no longer in the current schema. They now live in
     company_members. DROP is safe because data was already migrated in 004.
@@ -397,7 +405,9 @@ def _drop_legacy_company_columns(cursor, conn) -> None:
                 )
                 logger.debug("Migration: removed NOT NULL from companies.%s", col)
             except Exception:
-                logger.debug("Migration: %s already nullable or cannot drop NOT NULL", col)
+                logger.debug(
+                    "Migration: %s already nullable or cannot drop NOT NULL", col
+                )
             try:
                 # Drop the unique constraint on discord_id if it exists
                 cursor.execute(
@@ -406,10 +416,16 @@ def _drop_legacy_company_columns(cursor, conn) -> None:
                     "AND constraint_name = 'uq_companies_discord_id'"
                 )
                 if cursor.fetchone() is not None:
-                    cursor.execute("ALTER TABLE companies DROP CONSTRAINT uq_companies_discord_id")
-                    logger.debug("Migration: dropped uq_companies_discord_id constraint.")
+                    cursor.execute(
+                        "ALTER TABLE companies DROP CONSTRAINT uq_companies_discord_id"
+                    )
+                    logger.debug(
+                        "Migration: dropped uq_companies_discord_id constraint."
+                    )
             except Exception:
-                logger.debug("Migration: could not drop uq_companies_discord_id (may not exist)")
+                logger.debug(
+                    "Migration: could not drop uq_companies_discord_id (may not exist)"
+                )
             conn.commit()
 
 
@@ -425,7 +441,13 @@ def _run_sqlite_migrations(conn) -> None:
             logger.debug("Migration: added %s column.", col)
         except sqlite3.OperationalError:
             pass
-    for col in ["session_token", "session_created_at", "tier", "public_stash_token", "invite_code"]:
+    for col in [
+        "session_token",
+        "session_created_at",
+        "tier",
+        "public_stash_token",
+        "invite_code",
+    ]:
         if col not in _ALLOWED_COMPANY_COLUMNS:
             logger.warning("Skipping disallowed column '%s' in SQLite migration.", col)
             continue
@@ -591,7 +613,9 @@ def get_or_create_company_by_discord(
             "role": "owner",
             "session_token": "",
         }
-        logger.info("New company created via Discord: %s (%s)", discord_username, discord_id)
+        logger.info(
+            "New company created via Discord: %s (%s)", discord_username, discord_id
+        )
         return company, member
 
     except Exception:
@@ -624,17 +648,20 @@ def get_user_companies(discord_id: str) -> list[dict]:
         # Format the responses
         result = []
         for row in rows:
-            result.append({
-                "company_id": row["company_id"],
-                "company_name": row["company_name"] or f"Company #{row['company_id']}",
-                "is_active": bool(row["is_active"]),
-                "access_expires_at": row["access_expires_at"],
-                "tier": row["tier"],
-                "member_id": row["member_id"],
-                "role": row["role"],
-                "discord_username": row["discord_username"],
-                "discord_avatar": row["discord_avatar"],
-            })
+            result.append(
+                {
+                    "company_id": row["company_id"],
+                    "company_name": row["company_name"]
+                    or f"Company #{row['company_id']}",
+                    "is_active": bool(row["is_active"]),
+                    "access_expires_at": row["access_expires_at"],
+                    "tier": row["tier"],
+                    "member_id": row["member_id"],
+                    "role": row["role"],
+                    "discord_username": row["discord_username"],
+                    "discord_avatar": row["discord_avatar"],
+                }
+            )
         return result
     except Exception:
         logger.exception("Failed to get user companies")
@@ -703,7 +730,9 @@ def add_company_member(
         )
         member = _fetchone_as_dict(cursor)
         conn.close()
-        logger.info("Member %s added to company %d as %s", discord_username, company_id, role)
+        logger.info(
+            "Member %s added to company %d as %s", discord_username, company_id, role
+        )
         return member
     except Exception:
         logger.exception("Failed to add company member")
@@ -754,7 +783,9 @@ def remove_company_member(company_id: int, member_id: int) -> bool:
         return False
 
 
-def transfer_ownership(company_id: int, current_owner_member_id: int, new_owner_member_id: int) -> bool:
+def transfer_ownership(
+    company_id: int, current_owner_member_id: int, new_owner_member_id: int
+) -> bool:
     """
     Transfer company ownership from one member to another.
     The old owner becomes an admin.
@@ -795,7 +826,11 @@ def transfer_ownership(company_id: int, current_owner_member_id: int, new_owner_
         )
         conn.commit()
         conn.close()
-        logger.info("Ownership of company %d transferred to member %d", company_id, new_owner_member_id)
+        logger.info(
+            "Ownership of company %d transferred to member %d",
+            company_id,
+            new_owner_member_id,
+        )
         return True
     except Exception:
         logger.exception("Failed to transfer ownership")
@@ -841,7 +876,9 @@ def get_company_by_invite_code(invite_code: str) -> Optional[dict]:
         return None
 
 
-def add_member_by_invite(invite_code: str, discord_id: str, discord_username: str, discord_avatar: str = "") -> Optional[dict]:
+def add_member_by_invite(
+    invite_code: str, discord_id: str, discord_username: str, discord_avatar: str = ""
+) -> Optional[dict]:
     """
     Accept an invite code and add the user as a member to that company.
     Returns the member dict, or None if invalid/already a member.

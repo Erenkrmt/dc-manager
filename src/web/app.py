@@ -321,8 +321,12 @@ def render_login_page() -> None:
                     # Also show invite acceptance option
                     st.markdown("---")
                     st.subheader("🎟️ Have an invite code?")
-                    invite_code = st.text_input("Enter invite code:", key="invite_code_input")
-                    if st.button("Accept Invite", type="secondary", use_container_width=True):
+                    invite_code = st.text_input(
+                        "Enter invite code:", key="invite_code_input"
+                    )
+                    if st.button(
+                        "Accept Invite", type="secondary", use_container_width=True
+                    ):
                         if invite_code.strip():
                             member = db.add_member_by_invite(
                                 invite_code.strip(),
@@ -331,7 +335,9 @@ def render_login_page() -> None:
                                 discord_avatar,
                             )
                             if member:
-                                st.success("✅ You've been added to a new company! Select it above.")
+                                st.success(
+                                    "✅ You've been added to a new company! Select it above."
+                                )
                                 st.rerun()
                             else:
                                 st.error("❌ Invalid invite code or already a member.")
@@ -360,12 +366,16 @@ def render_login_page() -> None:
                         st.session_state.is_admin = (
                             discord_id in _settings.ADMIN_DISCORD_IDS
                         )
-                        _is_active, _is_read_only = db.check_company_access(company["id"])
+                        _is_active, _is_read_only = db.check_company_access(
+                            company["id"]
+                        )
                         st.session_state.is_read_only = _is_read_only
                         st.session_state.is_active = _is_active
 
                         st.query_params.clear()
-                        st.query_params["session"] = f"{member['id']}:{company['id']}:{session_token}"
+                        st.query_params["session"] = (
+                            f"{member['id']}:{company['id']}:{session_token}"
+                        )
                         st.rerun()
                     else:
                         st.error("❌ Could not create or find your company account.")
