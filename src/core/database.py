@@ -9,6 +9,7 @@ import os
 import logging
 import secrets
 import hashlib
+import hmac
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -464,19 +465,19 @@ def _run_sqlite_migrations(conn) -> None:
 
 
 def _hash_api_key(raw_key: str) -> str:
-    """Hash an API key with SHA-256 so it's never stored in plaintext."""
-    salt = secrets.token_hex(8)
-    hashed = hashlib.sha256(f"{salt}:{raw_key}".encode()).hexdigest()
+    """Hash an API key with PBKDF2-SHA256 so it's never stored in plaintext."""
+    salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac("sha256", raw_key.encode(), salt.encode(), iterations=600000).hex()
     return f"{salt}:{hashed}"
 
 
 def _check_api_key(raw_key: str, stored_hash: str) -> bool:
-    """Check a raw API key against the stored hash (salt:hex format)."""
+    """Check a raw API key against the stored PBKDF2 hash (salt:hex format)."""
     if ":" not in stored_hash:
         return False
     salt, expected_hash = stored_hash.split(":", 1)
-    actual_hash = hashlib.sha256(f"{salt}:{raw_key}".encode()).hexdigest()
-    return actual_hash == expected_hash
+    actual_hash = hashlib.pbkdf2_hmac("sha256", raw_key.encode(), salt.encode(), iterations=600000).hex()
+    return hmac.compare_digest(actual_hash, expected_hash)
 
 
 def _generate_api_key() -> str:
