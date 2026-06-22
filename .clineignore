@@ -1,0 +1,50 @@
+# =============================================================================
+# .clineignore – DC Trade Toolbox
+#
+# Patterns listed here are EXCLUDED from Cline's context window.
+# This saves ~40-50K tokens per session because Cline won't upload these
+# files to the API when analyzing or editing code.
+#
+# Syntax: Same as .gitignore (glob patterns)
+# =============================================================================
+
+# ── Lockfiles (giant & irrelevant for code understanding) ─────────────────
+uv.lock
+
+# ── Build & Deployment config (rarely modified during code work) ─────────
+Dockerfile
+docker-compose.yml
+.dockerignore
+Makefile
+sonar-project.properties
+
+# ── CI/CD workflows (rarely relevant during code work) ───────────────────
+.github/
+
+# ── Database migrations (only needed for schema changes) ─────────────────
+alembic/
+
+# ── Local data (SQLite DB, temp files) ───────────────────────────────────
+data/
+
+# ── Tests (only relevant when fixing bugs) ───────────────────────────────
+tests/
+
+# ── Utility scripts (not core code) ──────────────────────────────────────
+scripts/
+
+# ── Encrypted secrets (binary / unreadable) ──────────────────────────────
+*.encrypted
+.env.encrypted*
+
+# ── Config & tooling (not relevant for code analysis) ────────────────────
+.pre-commit-config.yaml
+.python-version
+.gitattributes
+alembic.ini
+
+# ── Environment example (not actual config) ──────────────────────────────
+.env.example
+
+# ── Redundant dependency list (pyproject.toml is the source of truth) ────
+requirements.txt
