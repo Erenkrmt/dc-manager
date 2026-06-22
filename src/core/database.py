@@ -552,7 +552,7 @@ def get_or_create_company_by_discord(
                 VALUES ({ph}, {ph}, {ph}, 1, 1, 'free', '', {ph}, {ph}, {ph})""",
             (hashed_api_key, "", trial_end, invite_code, now, now),
         )
-        company_id = cursor.lastrowid if not _USE_POSTGRES else cursor.fetchone()
+        company_id = cursor.lastrowid if not _USE_POSTGRES else 0
 
         # Get the new company ID for PostgreSQL
         if _USE_POSTGRES:
