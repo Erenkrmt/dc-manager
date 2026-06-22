@@ -129,4 +129,5 @@ jobs:
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v6
         with:
-          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          args: >
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
