@@ -7,7 +7,7 @@ import io
 import logging
 from datetime import datetime, timezone, timedelta
 #
-#from typing import Optional
+# from typing import Optional
 
 from src.core import database as db
 
@@ -38,6 +38,7 @@ def import_companies_from_csv(csv_text: str) -> dict:
 
     for row_num, row in enumerate(reader, start=2):  # start=2 because row 1 is header
         try:
+
             def _safe(val: str | None) -> str:
                 return (val or "").strip()
 
@@ -47,7 +48,7 @@ def import_companies_from_csv(csv_text: str) -> dict:
             access_expires = _safe(row.get("Access Expires"))
             active_str = _safe(row.get("Active")) or "1"
             trial_used_str = _safe(row.get("Trial Used")) or "0"
-            #discord = _safe(row.get("Discord"))
+            # discord = _safe(row.get("Discord"))
 
             is_active = 1 if active_str in ("1", "true", "yes") else 0
             trial_used = int(trial_used_str) if trial_used_str.isdigit() else 0
@@ -89,12 +90,23 @@ def import_companies_from_csv(csv_text: str) -> dict:
                                 trial_used = {ph},
                                 updated_at = {ph}
                             WHERE id = {ph}""",
-                            (company_name, tier, access_expires or None,
-                             is_active, trial_used, now, company_id),
+                            (
+                                company_name,
+                                tier,
+                                access_expires or None,
+                                is_active,
+                                trial_used,
+                                now,
+                                company_id,
+                            ),
                         )
                         conn.commit()
                         updated += 1
-                        logger.info("Company ID %d updated: %s", company_id, company_name or "(no name)")
+                        logger.info(
+                            "Company ID %d updated: %s",
+                            company_id,
+                            company_name or "(no name)",
+                        )
                     else:
                         # Create new company with specified ID
                         raw_api_key = db._generate_api_key()
@@ -107,15 +119,25 @@ def import_companies_from_csv(csv_text: str) -> dict:
                                  is_active, trial_used, tier, invite_code,
                                  created_at, updated_at)
                                 VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})""",
-                            (company_id, hashed_key, company_name,
-                             access_expires or None, is_active, trial_used,
-                             tier, invite_code, now, now),
+                            (
+                                company_id,
+                                hashed_key,
+                                company_name,
+                                access_expires or None,
+                                is_active,
+                                trial_used,
+                                tier,
+                                invite_code,
+                                now,
+                                now,
+                            ),
                         )
                         conn.commit()
                         created += 1
                         logger.info(
                             "Company ID %d created with API key: %s",
-                            company_id, raw_api_key,
+                            company_id,
+                            raw_api_key,
                         )
                 else:
                     # No ID — create new company (auto-increment ID)
@@ -127,6 +149,7 @@ def import_companies_from_csv(csv_text: str) -> dict:
                     trial_end = None
                     if trial_used == 0:
                         from src.core.settings import get_settings
+
                         trial_days = get_settings().TRIAL_DAYS
                         if trial_days > 0:
                             trial_end = (
@@ -140,9 +163,17 @@ def import_companies_from_csv(csv_text: str) -> dict:
                              is_active, trial_used, tier, invite_code,
                              created_at, updated_at)
                             VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})""",
-                        (hashed_key, company_name,
-                         access, is_active, trial_used,
-                         tier, invite_code, now, now),
+                        (
+                            hashed_key,
+                            company_name,
+                            access,
+                            is_active,
+                            trial_used,
+                            tier,
+                            invite_code,
+                            now,
+                            now,
+                        ),
                     )
                     conn.commit()
 
@@ -156,7 +187,8 @@ def import_companies_from_csv(csv_text: str) -> dict:
                     created += 1
                     logger.info(
                         "Company ID %d created from CSV with API key: %s",
-                        new_id, raw_api_key,
+                        new_id,
+                        raw_api_key,
                     )
 
             except Exception as exc:
@@ -179,6 +211,9 @@ def import_companies_from_csv(csv_text: str) -> dict:
     }
     logger.info(
         "Import complete: %d created, %d updated, %d skipped, %d errors.",
-        created, updated, skipped, len(errors),
+        created,
+        updated,
+        skipped,
+        len(errors),
     )
     return summary
