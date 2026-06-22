@@ -116,22 +116,17 @@ jobs:
           cache-to: type=gha,mode=max,scope=dc-trade
           tags: ${{ env.IMAGE_NAME }}:test-${{ github.sha }}
 
-  sonarcloud:
-    name: SonarCloud
-    runs-on: self-hosted
-    timeout-minutes: 10
-    if: github.event.pull_request.head.repo.full_name == github.repository
+  sonarqube:
+    name: Code Quality Scan
+    runs-on: [self-hosted, linux, x64]
+    needs: [lint, test]
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: SonarCloud Scan
-        uses: sonarsource/sonarqube-scan-action@v5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
         with:
-          args: >
-            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
-            -Dsonar.pullrequest.branch=${{ github.event.pull_request.head.ref }}
-            -Dsonar.pullrequest.base=${{ github.event.pull_request.base.ref }}
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
