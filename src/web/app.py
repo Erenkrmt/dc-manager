@@ -133,7 +133,9 @@ def _handle_oauth_callback() -> AuthState | None:
         st.error("❌ Could not create or find your company account.")
         return None
 
-    return _build_auth_state(company, member, discord_id, discord_username, discord_avatar)
+    return _build_auth_state(
+        company, member, discord_id, discord_username, discord_avatar
+    )
 
 
 def _build_auth_state(
@@ -161,9 +163,15 @@ def _build_auth_state(
     )
 
 
-def _complete_login(member_id: int, company_id: int, discord_id: str,
-                    discord_username: str, discord_avatar: str,
-                    company_name: str, member_role: str) -> AuthState:
+def _complete_login(
+    member_id: int,
+    company_id: int,
+    discord_id: str,
+    discord_username: str,
+    discord_avatar: str,
+    company_name: str,
+    member_role: str,
+) -> AuthState:
     """Generate a session token and build an AuthState for a completed login."""
     session_token = store_session(member_id)
     is_active, is_read_only = db.check_company_access(company_id)
@@ -411,12 +419,8 @@ def render_login_page() -> None:
             # Also show invite acceptance option
             st.markdown("---")
             st.subheader("🎟️ Have an invite code?")
-            invite_code = st.text_input(
-                "Enter invite code:", key="invite_code_input"
-            )
-            if st.button(
-                "Accept Invite", type="secondary", use_container_width=True
-            ):
+            invite_code = st.text_input("Enter invite code:", key="invite_code_input")
+            if st.button("Accept Invite", type="secondary", use_container_width=True):
                 if invite_code.strip():
                     member = db.add_member_by_invite(
                         invite_code.strip(),
