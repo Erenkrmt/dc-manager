@@ -13,9 +13,6 @@
 name: CI
 
 env:
-  # Allow Node 20-based actions to run on runners defaulting to Node 24+
-  # Remove once all actions we use have published Node 22+ versions
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/erenkrmt/dc-trade
 
@@ -110,22 +107,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Log in to Docker Hub so pulls get authenticated rate limits ──────────
-      # Without this, `docker build` pulls the base image anonymously (100/6h).
-      # With authentication: 200 pulls/6h. Combined with a local registry mirror
-      # (see stacks/docker-hub-cache/), the base image is cached after first pull.
+      # Log in to Docker Hub (Node 20+ kompatibel)
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@v3
         with:
           registry: docker.io
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image (no push)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
@@ -143,8 +137,9 @@ jobs:
         with:
           fetch-depth: 0
 
+
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v5
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
