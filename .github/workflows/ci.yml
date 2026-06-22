@@ -36,13 +36,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: uv.lock
-
       - name: Install uv
         run: pip install uv
 
@@ -53,6 +46,9 @@ jobs:
           key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
             uv-${{ runner.os }}-
+
+      - name: Install Python
+        run: uv python install
 
       - name: Install dependencies
         run: uv sync
@@ -70,13 +66,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version-file: .python-version
-          cache: pip
-          cache-dependency-path: uv.lock
-
       - name: Install uv
         run: pip install uv
 
@@ -87,6 +76,9 @@ jobs:
           key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
             uv-${{ runner.os }}-
+
+      - name: Install Python
+        run: uv python install
 
       - name: Install dependencies
         run: uv sync
