@@ -101,7 +101,6 @@ def resolve_company() -> SessionContext | None:
         print("\n❌ Your account is inactive. Contact the admin.")
         return None
 
-    display_name = company.get("discord_username") or company.get("company_name") or "User"
     print("\n✅ Authentication successful")
 
     ctx = SessionContext(company_id=company_id, is_read_only=is_read_only)
