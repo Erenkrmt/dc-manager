@@ -24,6 +24,9 @@ jobs:
   ci:
     name: CI (Lint + Test)
     uses: ./.github/workflows/ci.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   build-and-push:
     runs-on: self-hosted

@@ -19,7 +19,13 @@ on:
     branches:
       - feature/*
   workflow_call:
-
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: "Docker Hub username for authenticated pulls"
+        required: true
+      DOCKERHUB_TOKEN:
+        description: "Docker Hub token for authenticated pulls"
+        required: true
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
