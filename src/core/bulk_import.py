@@ -135,9 +135,8 @@ def import_companies_from_csv(csv_text: str) -> dict:
                         conn.commit()
                         created += 1
                         logger.info(
-                            "Company ID %d created with API key: %s",
+                            "Company ID %d created (API key generated)",
                             company_id,
-                            raw_api_key,
                         )
                 else:
                     # No ID — create new company (auto-increment ID)
@@ -186,15 +185,14 @@ def import_companies_from_csv(csv_text: str) -> dict:
 
                     created += 1
                     logger.info(
-                        "Company ID %d created from CSV with API key: %s",
+                        "Company ID %d created from CSV (API key generated)",
                         new_id,
-                        raw_api_key,
                     )
 
-            except Exception as exc:
+            except Exception:
                 conn.rollback()
-                errors.append(f"Row {row_num}: {exc}")
-                logger.exception("Failed to import row %d: %s", row_num, exc)
+                errors.append(f"Row {row_num}: import failed — see server logs")
+                logger.exception("Failed to import row %d", row_num)
                 skipped += 1
             finally:
                 conn.close()

@@ -595,7 +595,7 @@ def get_or_create_company_by_discord(
             "is_active": True,
             "tier": "free",
             "trial_used": 1,
-            "api_key": raw_api_key,
+            "api_key": "",
             "invite_code": invite_code,
         }
         member = {
