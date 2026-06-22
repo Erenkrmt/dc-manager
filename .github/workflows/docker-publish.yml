@@ -23,8 +23,6 @@ on:
       - "pyproject.toml"
       - "Dockerfile"
       - ".dockerignore"
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/docker-publish.yml"
   workflow_dispatch:
 
 concurrency:
@@ -91,3 +89,4 @@ jobs:
         with:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.build-and-push.outputs.digest }}
+          push-to-registry: true
