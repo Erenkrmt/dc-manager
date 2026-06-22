@@ -118,6 +118,5 @@ jobs:
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v6
         with:
-          args: >
-            -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+          projectBaseDir: .
 
