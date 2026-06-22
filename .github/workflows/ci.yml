@@ -115,23 +115,24 @@ jobs:
           cache-from: type=gha,scope=dc-trade
           cache-to: type=gha,mode=max,scope=dc-trade
           tags: ${{ env.IMAGE_NAME }}:test-${{ github.sha }}
+  sonarqube:
+    name: Code Quality Scan
+    runs-on: [self-hosted, linux, x64]
 
-  sonarcloud:
-    name: SonarCloud
-    runs-on: self-hosted
-    timeout-minutes: 10
-    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: SonarCloud Scan
-        uses: sonarsource/sonarqube-scan-action@v5
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
-            -Dsonar.pullrequest.branch=${{ github.event.pull_request.head.ref }}
-            -Dsonar.pullrequest.base=${{ github.event.pull_request.base.ref }}
+            -Dsonar.projectKey=docker-compose-homelab
+            -Dsonar.projectName="Docker Compose Homelab"
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/node_modules/**,**/vendor/**,**/__pycache__/**,**/.git/**,**/data/**,**/config/**,**/logs/**
+
