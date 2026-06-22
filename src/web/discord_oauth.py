@@ -165,6 +165,42 @@ def get_user_info_sync(access_token: str) -> dict | None:
         return None
 
 
+def get_username_by_discord_id(discord_id: str) -> str | None:
+    """
+    Look up a Discord user's global username by their Discord ID.
+    Uses the Discord Bot Token (if configured) via the bot API.
+    If no bot token is set, returns None gracefully.
+
+    This is used by the admin panel to auto-fill display names when
+    manually adding a member by Discord ID.
+    """
+    if not _settings.DISCORD_BOT_TOKEN:
+        logger.info("DISCORD_BOT_TOKEN not set — cannot resolve Discord username by ID.")
+        return None
+
+    headers = {
+        "Authorization": f"Bot {_settings.DISCORD_BOT_TOKEN}",
+    }
+    try:
+        with httpx.Client() as client:
+            resp = client.get(
+                f"{DISCORD_API_BASE}/users/{discord_id}",
+                headers=headers,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Discord user lookup for %s failed: %s %s",
+                    discord_id, resp.status_code, resp.text,
+                )
+                return None
+            user_data = resp.json()
+            return user_data.get("global_name") or user_data.get("username", None)
+    except Exception:
+        logger.exception("Discord user lookup error for %s", discord_id)
+        return None
+
+
 def get_avatar_url(user: dict) -> str:
     """
     Build the CDN URL for a Discord user's avatar.

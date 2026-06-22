@@ -116,6 +116,8 @@ class Settings:
     # Discord OAuth 2.0 — set these in .env for production
     DISCORD_CLIENT_ID: str = os.getenv("DISCORD_CLIENT_ID", "")
     DISCORD_CLIENT_SECRET: str = os.getenv("DISCORD_CLIENT_SECRET", "")
+    # Discord Bot Token (optional) — used for admin Discord user lookups by ID
+    DISCORD_BOT_TOKEN: str = os.getenv("DISCORD_BOT_TOKEN", "")
     # Comma-separated list of Discord user IDs that have admin access
     ADMIN_DISCORD_IDS: list[str] = [
         x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip()

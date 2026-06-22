@@ -23,6 +23,9 @@ _ALLOWED_STASH_COLUMNS = frozenset(
 _ALLOWED_COMPANY_COLUMNS = frozenset(
     {"session_token", "session_created_at", "tier", "public_stash_token", "invite_code"}
 )
+_ALLOWED_MEMBER_COLUMNS = frozenset(
+    {"notes"}
+)
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +375,20 @@ def _run_pg_migrations(cursor, conn) -> None:
             )
             logger.debug("Migration: added %s column to companies table.", col)
 
+    # ── Migration: Add notes column to company_members ──
+    for col in ["notes"]:
+        if col not in _ALLOWED_MEMBER_COLUMNS:
+            logger.warning("Skipping disallowed column '%s' in PG migration.", col)
+            continue
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'company_members' AND column_name = %s",
+            (col,),
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(f"ALTER TABLE company_members ADD COLUMN {col} TEXT DEFAULT ''")
+            logger.debug("Migration: added %s column to company_members.", col)
+
     # ── Migration: Drop legacy discord_id/discord_username/discord_avatar from companies ──
     # These columns were created by migration 002 but are now stored in company_members.
     # The current PG schema in init_db() does NOT include them, but they still exist
@@ -460,6 +477,17 @@ def _run_sqlite_migrations(conn) -> None:
                 conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT ''")
             conn.commit()
             logger.debug("Migration: added %s column to companies table.", col)
+        except sqlite3.OperationalError:
+            pass
+    # ── Migration: Add notes column to company_members (SQLite) ──
+    for col in ["notes"]:
+        if col not in _ALLOWED_MEMBER_COLUMNS:
+            logger.warning("Skipping disallowed column '%s' in SQLite migration.", col)
+            continue
+        try:
+            conn.execute(f"ALTER TABLE company_members ADD COLUMN {col} TEXT DEFAULT ''")
+            conn.commit()
+            logger.debug("Migration: added %s column to company_members.", col)
         except sqlite3.OperationalError:
             pass
 
@@ -933,6 +961,25 @@ def update_company_member_role(company_id: int, member_id: int, new_role: str) -
         return True
     except Exception:
         logger.exception("Failed to update member role")
+        return False
+
+
+def update_member_notes(company_id: int, member_id: int, notes: str) -> bool:
+    """Update the notes field on a company member."""
+    ph = _ph()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE company_members SET notes = {ph}, updated_at = {ph} WHERE id = {ph} AND company_id = {ph}",
+            (notes, now, member_id, company_id),
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        logger.exception("Failed to update member notes")
         return False
 
 
