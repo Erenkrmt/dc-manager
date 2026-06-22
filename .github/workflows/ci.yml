@@ -33,6 +33,12 @@ on:
       DOCKER_PASSWORD:
         description: "Docker Hub password/token for authenticated pulls"
         required: true
+      SONAR_HOST_URL:
+        description: "SonarQube server URL"
+        required: true
+      SONAR_TOKEN:
+        description: "SonarQube access token"
+        required: true
 
 concurrency:
   group: ci-${{ github.ref }}
