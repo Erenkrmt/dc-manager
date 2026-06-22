@@ -1,5 +1,5 @@
 # =============================================================================
-# ci.yml – Continuous Integration (Lint, Test, Build, SonarCloud)
+# ci.yml – Continuous Integration (Lint, Test, Build, SonarQube)
 #
 # Runs on:
 #   - pull_request (any branch)
@@ -36,10 +36,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: uv.lock
 
@@ -59,8 +59,6 @@ jobs:
 
       - name: Run ruff linter
         run: uv run ruff check src/ tests/
-      - name: Run Ruff formatter format
-        run: uv run ruff format src/ tests/
       - name: Run ruff formatter check
         run: uv run ruff format --check src/ tests/
 
@@ -72,10 +70,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: uv.lock
 
@@ -118,6 +116,7 @@ jobs:
   sonarqube:
     name: Code Quality Scan
     runs-on: [self-hosted, linux, x64]
+    needs: [lint, test]
 
     steps:
       - uses: actions/checkout@v4
@@ -131,8 +130,5 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=docker-compose-homelab
-            -Dsonar.projectName="Docker Compose Homelab"
-            -Dsonar.sources=.
-            -Dsonar.exclusions=**/node_modules/**,**/vendor/**,**/__pycache__/**,**/.git/**,**/data/**,**/config/**,**/logs/**
+            -Dsonar.python.version=3
 
