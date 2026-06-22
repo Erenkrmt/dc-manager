@@ -17,15 +17,11 @@ from src.core.settings import get_settings
 _settings = get_settings()
 
 # ── Allowed column names for safe dynamic migration queries ──
-_ALLOWED_STASH_COLUMNS = frozenset(
-    {"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"}
-)
+_ALLOWED_STASH_COLUMNS = frozenset({"auto_subtract", "raw_iron_blocks", "raw_gold_blocks"})
 _ALLOWED_COMPANY_COLUMNS = frozenset(
     {"session_token", "session_created_at", "tier", "public_stash_token", "invite_code"}
 )
-_ALLOWED_MEMBER_COLUMNS = frozenset(
-    {"notes"}
-)
+_ALLOWED_MEMBER_COLUMNS = frozenset({"notes"})
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +33,7 @@ if _USE_POSTGRES:
         import psycopg2
         import psycopg2.extras
     except ImportError:
-        logger.error(
-            "DATABASE_URL is set but psycopg2 is not installed. "
-            "Install it with: pip install psycopg2-binary"
-        )
+        logger.error("DATABASE_URL is set but psycopg2 is not installed. Install it with: pip install psycopg2-binary")
         raise
 else:
     import sqlite3
@@ -56,11 +49,7 @@ def get_connection():
         if not _sslmode:
             # Auto-detect: require for remote hosts, disable for local ones
             _host = _settings.DATABASE_URL.split("@")[-1].split(":")[0]
-            _sslmode = (
-                "require"
-                if _host not in ("postgres", "localhost", "127.0.0.1")
-                else "disable"
-            )
+            _sslmode = "require" if _host not in ("postgres", "localhost", "127.0.0.1") else "disable"
         conn = psycopg2.connect(
             _settings.DATABASE_URL,
             sslmode=_sslmode,
@@ -324,9 +313,7 @@ def init_db() -> None:
             conn.commit()
             _run_sqlite_migrations(conn)
 
-        logger.info(
-            "Database initialized (%s).", "PostgreSQL" if _USE_POSTGRES else "SQLite"
-        )
+        logger.info("Database initialized (%s).", "PostgreSQL" if _USE_POSTGRES else "SQLite")
     except Exception:
         logger.exception("Failed to initialize database")
         raise
@@ -342,8 +329,7 @@ def _run_pg_migrations(cursor, conn) -> None:
             logger.warning("Skipping disallowed column '%s' in PG migration.", col)
             continue
         cursor.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'stash' AND column_name = %s",
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'stash' AND column_name = %s",
             (col,),
         )
         if cursor.fetchone() is None:
@@ -360,19 +346,12 @@ def _run_pg_migrations(cursor, conn) -> None:
             logger.warning("Skipping disallowed column '%s' in PG migration.", col)
             continue
         cursor.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'companies' AND column_name = %s",
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'companies' AND column_name = %s",
             (col,),
         )
         if cursor.fetchone() is None:
-            default_val = (
-                "''"
-                if col in ("session_token", "public_stash_token", "invite_code")
-                else "'free'"
-            )
-            cursor.execute(
-                f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}"
-            )
+            default_val = "''" if col in ("session_token", "public_stash_token", "invite_code") else "'free'"
+            cursor.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}")
             logger.debug("Migration: added %s column to companies table.", col)
 
     # ── Migration: Add notes column to company_members ──
@@ -410,21 +389,16 @@ def _drop_legacy_company_columns(cursor, conn) -> None:
     legacy_cols = ["discord_id", "discord_username", "discord_avatar"]
     for col in legacy_cols:
         cursor.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'companies' AND column_name = %s",
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'companies' AND column_name = %s",
             (col,),
         )
         if cursor.fetchone() is not None:
             try:
                 # First drop the NOT NULL constraint by making it nullable
-                cursor.execute(
-                    f"ALTER TABLE companies ALTER COLUMN {col} DROP NOT NULL"
-                )
+                cursor.execute(f"ALTER TABLE companies ALTER COLUMN {col} DROP NOT NULL")
                 logger.debug("Migration: removed NOT NULL from companies.%s", col)
             except Exception:
-                logger.debug(
-                    "Migration: %s already nullable or cannot drop NOT NULL", col
-                )
+                logger.debug("Migration: %s already nullable or cannot drop NOT NULL", col)
             try:
                 # Drop the unique constraint on discord_id if it exists
                 cursor.execute(
@@ -433,16 +407,10 @@ def _drop_legacy_company_columns(cursor, conn) -> None:
                     "AND constraint_name = 'uq_companies_discord_id'"
                 )
                 if cursor.fetchone() is not None:
-                    cursor.execute(
-                        "ALTER TABLE companies DROP CONSTRAINT uq_companies_discord_id"
-                    )
-                    logger.debug(
-                        "Migration: dropped uq_companies_discord_id constraint."
-                    )
+                    cursor.execute("ALTER TABLE companies DROP CONSTRAINT uq_companies_discord_id")
+                    logger.debug("Migration: dropped uq_companies_discord_id constraint.")
             except Exception:
-                logger.debug(
-                    "Migration: could not drop uq_companies_discord_id (may not exist)"
-                )
+                logger.debug("Migration: could not drop uq_companies_discord_id (may not exist)")
             conn.commit()
 
 
@@ -470,9 +438,7 @@ def _run_sqlite_migrations(conn) -> None:
             continue
         try:
             if col == "session_created_at":
-                conn.execute(
-                    f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT NULL"
-                )
+                conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT NULL")
             else:
                 conn.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT ''")
             conn.commit()
@@ -593,9 +559,9 @@ def get_or_create_company_by_discord(
         if _settings.TRIAL_DAYS > 0:
             from datetime import timedelta
 
-            trial_end = (
-                datetime.now(timezone.utc) + timedelta(days=_settings.TRIAL_DAYS)
-            ).strftime("%Y-%m-%d %H:%M:%S")
+            trial_end = (datetime.now(timezone.utc) + timedelta(days=_settings.TRIAL_DAYS)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
 
         cursor.execute(
             f"""INSERT INTO companies (api_key, company_name, access_expires_at, is_active, trial_used, tier, public_stash_token, invite_code, created_at, updated_at)
@@ -641,9 +607,7 @@ def get_or_create_company_by_discord(
             "role": "owner",
             "session_token": "",
         }
-        logger.info(
-            "New company created via Discord: %s (%s)", discord_username, discord_id
-        )
+        logger.info("New company created via Discord: %s (%s)", discord_username, discord_id)
         return company, member
 
     except Exception:
@@ -679,8 +643,7 @@ def get_user_companies(discord_id: str) -> list[dict]:
             result.append(
                 {
                     "company_id": row["company_id"],
-                    "company_name": row["company_name"]
-                    or f"Company #{row['company_id']}",
+                    "company_name": row["company_name"] or f"Company #{row['company_id']}",
                     "is_active": bool(row["is_active"]),
                     "access_expires_at": row["access_expires_at"],
                     "tier": row["tier"],
@@ -758,9 +721,7 @@ def add_company_member(
         )
         member = _fetchone_as_dict(cursor)
         conn.close()
-        logger.info(
-            "Member %s added to company %d as %s", discord_username, company_id, role
-        )
+        logger.info("Member %s added to company %d as %s", discord_username, company_id, role)
         return member
     except Exception:
         logger.exception("Failed to add company member")
@@ -811,9 +772,7 @@ def remove_company_member(company_id: int, member_id: int) -> bool:
         return False
 
 
-def transfer_ownership(
-    company_id: int, current_owner_member_id: int, new_owner_member_id: int
-) -> bool:
+def transfer_ownership(company_id: int, current_owner_member_id: int, new_owner_member_id: int) -> bool:
     """
     Transfer company ownership from one member to another.
     The old owner becomes an admin.
@@ -1044,9 +1003,7 @@ def update_company_access(company_id: int, days: int) -> bool:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     from datetime import timedelta
 
-    new_expiry = (datetime.now(timezone.utc) + timedelta(days=days)).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    new_expiry = (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         conn = get_connection()
         cursor = conn.cursor()
@@ -1056,9 +1013,7 @@ def update_company_access(company_id: int, days: int) -> bool:
         )
         conn.commit()
         conn.close()
-        logger.info(
-            "Company %d access extended by %d days to %s", company_id, days, new_expiry
-        )
+        logger.info("Company %d access extended by %d days to %s", company_id, days, new_expiry)
         return True
     except Exception:
         logger.exception("Failed to update company access")
@@ -1363,9 +1318,7 @@ def log_deal(
         logger.exception("Failed to log deal to database")
 
 
-def update_deal(
-    deal_id: int, status: str, offered_price: float, company_id: int = 1
-) -> bool:
+def update_deal(deal_id: int, status: str, offered_price: float, company_id: int = 1) -> bool:
     """Update a deal's status and/or offered price. Scoped by company_id."""
     ph = _ph()
     sql = f"""UPDATE deals SET status = {ph}, offered_price = {ph},
@@ -1651,9 +1604,7 @@ def log_item_deal(
         )
         conn.commit()
         conn.close()
-        logger.info(
-            "Item lookup deal logged: %s | %s | %s", item_name, status, date_str
-        )
+        logger.info("Item lookup deal logged: %s | %s | %s", item_name, status, date_str)
     except Exception:
         logger.exception("Failed to log item lookup deal")
 
@@ -1880,9 +1831,7 @@ def clear_stash(company_id: int = 1) -> None:
     save_stash(stash, company_id=company_id)
 
 
-def import_items_to_stash(
-    raw_text: str, company_id: int = 1
-) -> tuple[dict, list[str], list[str]]:
+def import_items_to_stash(raw_text: str, company_id: int = 1) -> tuple[dict, list[str], list[str]]:
     """
     Parse a raw item dump (e.g. pasted from the game) and replace the entire stash
     with the recognised materials for a given company.

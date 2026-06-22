@@ -38,10 +38,8 @@ scripts/
 .env.encrypted*
 
 # ── Config & tooling (not relevant for code analysis) ────────────────────
-.pre-commit-config.yaml
-.python-version
-.gitattributes
-alembic.ini
+
+
 
 # ── Environment example (not actual config) ──────────────────────────────
 .env.example

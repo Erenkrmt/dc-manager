@@ -42,9 +42,7 @@ LBL_DIAMOND = "Diamond"
 
 # ── Prompt messages ─────────────────────────────────────────────────────────
 
-PROMPT_ENTER_RAW_NUMBERS = (
-    "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
-)
+PROMPT_ENTER_RAW_NUMBERS = "   (Enter raw numbers – not stacks. Leave empty to keep stash value.)"
 
 # ── Company settings labels ─────────────────────────────────────────────────
 

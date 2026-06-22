@@ -29,3 +29,16 @@ httpx2-compat = [
 dc-trade = "src.main:main"
 dc-trade-web = "src.web.app:main"
 dc-trade-api = "src.web.api:run"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+per-file-ignores = { "alembic/*" = ["E402"] }
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "ruff>=0.15.18",
+]

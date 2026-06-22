@@ -38,9 +38,7 @@ async def exchange_code(code: str) -> dict | None:
     Returns the token data dict, or None on failure.
     """
     if not _settings.DISCORD_CLIENT_ID or not _settings.DISCORD_CLIENT_SECRET:
-        logger.error(
-            "Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)"
-        )
+        logger.error("Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)")
         return None
 
     data = {
@@ -61,9 +59,7 @@ async def exchange_code(code: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error(
-                    "Discord token exchange failed: %s %s", resp.status_code, resp.text
-                )
+                logger.error("Discord token exchange failed: %s %s", resp.status_code, resp.text)
                 return None
             return resp.json()
     except Exception:
@@ -85,9 +81,7 @@ async def get_user_info(access_token: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error(
-                    "Discord user info fetch failed: %s %s", resp.status_code, resp.text
-                )
+                logger.error("Discord user info fetch failed: %s %s", resp.status_code, resp.text)
                 return None
             return resp.json()
     except Exception:
@@ -104,9 +98,7 @@ def exchange_code_sync(code: str) -> dict | None:
     Safe to call from Streamlit's event loop context.
     """
     if not _settings.DISCORD_CLIENT_ID or not _settings.DISCORD_CLIENT_SECRET:
-        logger.error(
-            "Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)"
-        )
+        logger.error("Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)")
         return None
 
     data = {
@@ -191,7 +183,9 @@ def get_username_by_discord_id(discord_id: str) -> str | None:
             if resp.status_code != 200:
                 logger.warning(
                     "Discord user lookup for %s failed: %s %s",
-                    discord_id, resp.status_code, resp.text,
+                    discord_id,
+                    resp.status_code,
+                    resp.text,
                 )
                 return None
             user_data = resp.json()

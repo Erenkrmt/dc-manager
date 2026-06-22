@@ -34,13 +34,17 @@ def main():
     # Check if .env has unstaged or staged changes
     result = subprocess.run(
         ["git", "diff", "--name-only", "--", ".env"],
-        capture_output=True, text=True, cwd=project_root,
+        capture_output=True,
+        text=True,
+        cwd=project_root,
     )
     staged = result.stdout.strip()
 
     result = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--", ".env"],
-        capture_output=True, text=True, cwd=project_root,
+        capture_output=True,
+        text=True,
+        cwd=project_root,
     )
     cached = result.stdout.strip()
 
@@ -66,8 +70,18 @@ def main():
 
     encrypted_file = project_root / ".env.encrypted"
     result = subprocess.run(
-        [sops_path, "--encrypt", "--input-type", "dotenv", "--output-type", "dotenv", str(env_file)],
-        capture_output=True, text=True, env=env,
+        [
+            sops_path,
+            "--encrypt",
+            "--input-type",
+            "dotenv",
+            "--output-type",
+            "dotenv",
+            str(env_file),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
     if result.returncode != 0:

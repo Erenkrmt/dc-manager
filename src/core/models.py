@@ -54,9 +54,7 @@ class CompanyMember(Base):
 
     company = relationship("Company", back_populates="members")
 
-    __table_args__ = (
-        UniqueConstraint("company_id", "discord_id", name="uq_company_member"),
-    )
+    __table_args__ = (UniqueConstraint("company_id", "discord_id", name="uq_company_member"),)
 
 
 _COMPANIES_ID = "companies.id"

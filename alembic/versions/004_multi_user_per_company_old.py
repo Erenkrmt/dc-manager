@@ -25,7 +25,12 @@ def upgrade() -> None:
         op.create_table(
             "company_members",
             sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-            sa.Column("company_id", sa.Integer(), sa.ForeignKey("companies.id"), nullable=False),
+            sa.Column(
+                "company_id",
+                sa.Integer(),
+                sa.ForeignKey("companies.id"),
+                nullable=False,
+            ),
             sa.Column("discord_id", sa.Text(), unique=True, nullable=False),
             sa.Column("discord_username", sa.Text(), nullable=False),
             sa.Column("discord_avatar", sa.Text(), default=""),
@@ -44,9 +49,7 @@ def upgrade() -> None:
             "session_token, session_created_at, created_at, updated_at "
             "FROM companies WHERE discord_id != ''"
         )
-        existing_members = conn.exec_driver_sql(
-            "SELECT discord_id FROM company_members"
-        ).fetchall()
+        existing_members = conn.exec_driver_sql("SELECT discord_id FROM company_members").fetchall()
         existing_discord_ids = {row[0] for row in existing_members}
 
         for row in result:
@@ -56,7 +59,16 @@ def upgrade() -> None:
                        (company_id, discord_id, discord_username, discord_avatar, role,
                         session_token, session_created_at, created_at, updated_at)
                        VALUES (%s, %s, %s, %s, 'owner', %s, %s, %s, %s)""",
-                    (row[0], row[1], row[2], row[3] or "", row[4] or "", row[5], row[6], row[7]),
+                    (
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3] or "",
+                        row[4] or "",
+                        row[5],
+                        row[6],
+                        row[7],
+                    ),
                 )
 
 

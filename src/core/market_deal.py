@@ -36,9 +36,7 @@ def get_api_key() -> str:
     """Return the API key from the environment variable."""
     api_key = os.getenv("DC_API_KEY")
     if not api_key:
-        logger.error(
-            "❌ NO API KEY FOUND! Please set 'DC_API_KEY=your_key' in your .env file."
-        )
+        logger.error("❌ NO API KEY FOUND! Please set 'DC_API_KEY=your_key' in your .env file.")
         sys.exit(1)
     return api_key
 
@@ -65,17 +63,11 @@ def analyze_deal(
       profit_loss, status, status_emoji, status_msg, stacks, shulkers,
       counter_offer (optional)
     """
-    total_market_value = (
-        (iron_ingots * price_iron)
-        + (gold_ingots * price_gold)
-        + (diamond_items * price_diamond)
-    )
+    total_market_value = (iron_ingots * price_iron) + (gold_ingots * price_gold) + (diamond_items * price_diamond)
     min_needed_price = total_market_value * MIN_ACCEPTABLE_PERCENT
     offered_price = offered_price or 0.0
 
-    percent_of_market = (
-        (offered_price / total_market_value) * 100 if total_market_value > 0 else 0
-    )
+    percent_of_market = (offered_price / total_market_value) * 100 if total_market_value > 0 else 0
     profit_loss = offered_price - total_market_value
 
     stacks = (iron_ingots + gold_ingots + diamond_items) / float(ITEMS_PER_STACK)
@@ -89,16 +81,11 @@ def analyze_deal(
     elif offered_price >= min_needed_price:
         status = "ACCEPTED (BULK)"
         status_emoji = "🟨"
-        status_msg = (
-            f"OK! Within bulk discount range (discount: {abs(profit_loss):.2f}$)"
-        )
+        status_msg = f"OK! Within bulk discount range (discount: {abs(profit_loss):.2f}$)"
     else:
         status = "REJECTED"
         status_emoji = "🟥"
-        status_msg = (
-            f"TOO CHEAP! You are missing "
-            f"{min_needed_price - offered_price:.2f}$ to reach your limit."
-        )
+        status_msg = f"TOO CHEAP! You are missing {min_needed_price - offered_price:.2f}$ to reach your limit."
 
     result: dict = {
         "market_value": total_market_value,
@@ -127,9 +114,7 @@ def analyze_deal(
 
         if total_metals > 0 and remaining_budget > 0:
             ratio = iron_ingots / total_metals
-            fair_metals = remaining_budget / (
-                (ratio * price_iron) + ((1 - ratio) * price_gold)
-            )
+            fair_metals = remaining_budget / ((ratio * price_iron) + ((1 - ratio) * price_gold))
             result["counter_offer"] = {
                 "iron": fair_metals * ratio if iron_ingots > 0 else 0,
                 "gold": fair_metals * (1 - ratio) if gold_ingots > 0 else 0,
@@ -146,15 +131,13 @@ def stash_ingot_equivalents(stash: dict) -> tuple[int, int, int]:
     Calculate total ingot/items from a stash dict.
     Returns (total_iron_ingots, total_gold_ingots, total_diamond_items).
     """
-    total_iron = (
-        stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)
-    ) * INGOTS_PER_BLOCK + stash.get("iron_ingots", 0)
-    total_gold = (
-        stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)
-    ) * INGOTS_PER_BLOCK + stash.get("gold_ingots", 0)
-    total_diamond = stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK + stash.get(
-        "diamond_items", 0
+    total_iron = (stash.get("iron_blocks", 0) + stash.get("raw_iron_blocks", 0)) * INGOTS_PER_BLOCK + stash.get(
+        "iron_ingots", 0
     )
+    total_gold = (stash.get("gold_blocks", 0) + stash.get("raw_gold_blocks", 0)) * INGOTS_PER_BLOCK + stash.get(
+        "gold_ingots", 0
+    )
+    total_diamond = stash.get("diamond_blocks", 0) * INGOTS_PER_BLOCK + stash.get("diamond_items", 0)
     return total_iron, total_gold, total_diamond
 
 
@@ -162,17 +145,11 @@ def format_subtract_result(result: dict) -> str:
     """Format a stash subtraction result dict into a human-readable string."""
     parts = []
     if result.get("iron_blocks") or result.get("iron_ingots"):
-        parts.append(
-            f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots"
-        )
+        parts.append(f"Iron: {result['iron_blocks']} blocks + {result['iron_ingots']} ingots")
     if result.get("gold_blocks") or result.get("gold_ingots"):
-        parts.append(
-            f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots"
-        )
+        parts.append(f"Gold: {result['gold_blocks']} blocks + {result['gold_ingots']} ingots")
     if result.get("diamond_blocks") or result.get("diamond_items"):
-        parts.append(
-            f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items"
-        )
+        parts.append(f"Diamonds: {result['diamond_blocks']} blocks + {result['diamond_items']} items")
     return ", ".join(parts)
 
 
@@ -200,9 +177,7 @@ def handle_stash_subtraction(
     auto_sub = db.get_auto_subtract(company_id=company_id)
 
     if auto_sub or auto_confirm:
-        result = db.subtract_from_stash(
-            iron_ingots, gold_ingots, diamond_items, company_id=company_id
-        )
+        result = db.subtract_from_stash(iron_ingots, gold_ingots, diamond_items, company_id=company_id)
         return result
 
     return {"pending": True}
@@ -270,10 +245,7 @@ class MarketDeal:
         """
         encoded_name = quote(item_name.strip(), safe="")
         api_key = get_api_key()
-        url = (
-            f"https://api.democracycraft.net/economy/api/v1/chestshop/items/"
-            f"{encoded_name}?days={PRICE_DAYS_LOOKBACK}"
-        )
+        url = f"https://api.democracycraft.net/economy/api/v1/chestshop/items/{encoded_name}?days={PRICE_DAYS_LOOKBACK}"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
@@ -333,9 +305,7 @@ class MarketDeal:
                 fetched_price = float(avg)
             else:
                 shops = data.get("cheapestShops", [])
-                prices = [
-                    float(s["buyPrice"]) for s in shops if s.get("buyPrice") is not None
-                ]
+                prices = [float(s["buyPrice"]) for s in shops if s.get("buyPrice") is not None]
                 if prices:
                     fetched_price = min(prices)
 
@@ -419,9 +389,7 @@ class MarketDeal:
         """Parse API response data into a structured item lookup result dict."""
         avg = data.get("avgUnitPrice")
         shops = data.get("cheapestShops", [])
-        all_prices = [
-            float(s["buyPrice"]) for s in shops if s.get("buyPrice") is not None
-        ]
+        all_prices = [float(s["buyPrice"]) for s in shops if s.get("buyPrice") is not None]
 
         result = {
             "item_name": item_name,

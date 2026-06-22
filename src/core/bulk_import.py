@@ -152,9 +152,9 @@ def import_companies_from_csv(csv_text: str) -> dict:
 
                         trial_days = get_settings().TRIAL_DAYS
                         if trial_days > 0:
-                            trial_end = (
-                                datetime.now(timezone.utc) + timedelta(days=trial_days)
-                            ).strftime("%Y-%m-%d %H:%M:%S")
+                            trial_end = (datetime.now(timezone.utc) + timedelta(days=trial_days)).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
                     access = access_expires or trial_end
 
                     cursor.execute(

@@ -95,9 +95,7 @@ class TestAuthEndpoints:
     def test_update_company_name(self, client):
         """PUT /auth/name should update the display name."""
         _, api_key = _create_company()
-        r = client.put(
-            "/auth/name", params={"name": "My Corp"}, headers={"X-API-Key": api_key}
-        )
+        r = client.put("/auth/name", params={"name": "My Corp"}, headers={"X-API-Key": api_key})
         assert r.status_code == 200
         data = r.json()
         assert data["company_name"] == "My Corp"
@@ -231,9 +229,7 @@ class TestPricesEndpoint:
         def _mock_fetch_live_prices(*args, **kwargs):
             return (5.0, 10.0, 20.0, {})
 
-        monkeypatch.setattr(
-            "src.core.market_deal.fetch_live_prices", _mock_fetch_live_prices
-        )
+        monkeypatch.setattr("src.core.market_deal.fetch_live_prices", _mock_fetch_live_prices)
         r = client.get("/prices")
         assert r.status_code == 200
         data = r.json()
@@ -254,9 +250,7 @@ class TestStashMutations:
     def test_save_stash_via_api(self, client):
         """PUT /stash should save stash."""
         _, api_key = _create_company()
-        r = client.put(
-            "/stash", json={"iron_blocks": 42}, headers={"X-API-Key": api_key}
-        )
+        r = client.put("/stash", json={"iron_blocks": 42}, headers={"X-API-Key": api_key})
         assert r.status_code == 200
         data = r.json()
         assert data["iron_blocks"] == 42

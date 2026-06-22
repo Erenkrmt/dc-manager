@@ -50,35 +50,75 @@ def upgrade() -> None:
     )
 
     # ── 3. Add company_id to deals ─────────────────────────────────────────
-    op.add_column("deals", sa.Column("company_id", sa.Integer(),
-                  sa.ForeignKey("companies.id"), nullable=False, server_default="1"))
+    op.add_column(
+        "deals",
+        sa.Column(
+            "company_id",
+            sa.Integer(),
+            sa.ForeignKey("companies.id"),
+            nullable=False,
+            server_default="1",
+        ),
+    )
     op.create_index("ix_deals_company_id", "deals", ["company_id"])
 
     # ── 4. Rework stash ────────────────────────────────────────────────────
     # Drop the old single-row CHECK constraint
     op.execute("ALTER TABLE stash DROP CONSTRAINT IF EXISTS stash_single_row")
     # Add company_id — seed 1 for any existing stash row
-    op.add_column("stash", sa.Column("company_id", sa.Integer(),
-                  sa.ForeignKey("companies.id"), nullable=False, server_default="1"))
+    op.add_column(
+        "stash",
+        sa.Column(
+            "company_id",
+            sa.Integer(),
+            sa.ForeignKey("companies.id"),
+            nullable=False,
+            server_default="1",
+        ),
+    )
     # Make id auto-increment (PostgreSQL handles this; SQLite needs recreate)
     # Add unique constraint per company
     op.create_unique_constraint("uq_stash_company", "stash", ["company_id"])
 
     # ── 5. Add company_id to templates ─────────────────────────────────────
-    op.add_column("templates", sa.Column("company_id", sa.Integer(),
-                  sa.ForeignKey("companies.id"), nullable=False, server_default="1"))
+    op.add_column(
+        "templates",
+        sa.Column(
+            "company_id",
+            sa.Integer(),
+            sa.ForeignKey("companies.id"),
+            nullable=False,
+            server_default="1",
+        ),
+    )
     # Drop old PK on name alone, create compound PK
     op.execute("ALTER TABLE templates DROP CONSTRAINT IF EXISTS templates_pkey")
     op.create_primary_key("pk_templates", "templates", ["name", "company_id"])
 
     # ── 6. Add company_id to price_history ─────────────────────────────────
-    op.add_column("price_history", sa.Column("company_id", sa.Integer(),
-                  sa.ForeignKey("companies.id"), nullable=False, server_default="1"))
+    op.add_column(
+        "price_history",
+        sa.Column(
+            "company_id",
+            sa.Integer(),
+            sa.ForeignKey("companies.id"),
+            nullable=False,
+            server_default="1",
+        ),
+    )
     op.create_index("ix_price_history_company_id", "price_history", ["company_id"])
 
     # ── 7. Add company_id to item_lookup_deals ─────────────────────────────
-    op.add_column("item_lookup_deals", sa.Column("company_id", sa.Integer(),
-                  sa.ForeignKey("companies.id"), nullable=False, server_default="1"))
+    op.add_column(
+        "item_lookup_deals",
+        sa.Column(
+            "company_id",
+            sa.Integer(),
+            sa.ForeignKey("companies.id"),
+            nullable=False,
+            server_default="1",
+        ),
+    )
     op.create_index("ix_item_lookup_deals_company_id", "item_lookup_deals", ["company_id"])
 
 
