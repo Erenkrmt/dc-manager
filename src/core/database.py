@@ -363,7 +363,54 @@ def _run_pg_migrations(cursor, conn) -> None:
                 f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT {default_val}"
             )
             logger.debug("Migration: added %s column to companies table.", col)
+
+    # ── Migration: Drop legacy discord_id/discord_username/discord_avatar from companies ──
+    # These columns were created by migration 002 but are now stored in company_members.
+    # The current PG schema in init_db() does NOT include them, but they still exist
+    # on tables created by the old migration with NOT NULL constraints.
+    # This causes INSERT failures in get_or_create_company_by_discord() because that
+    # function no longer supplies these columns.
+    _drop_legacy_company_columns(cursor, conn)
+
     conn.commit()
+
+
+def _drop_legacy_company_columns(cursor, conn) -> None:
+    """Drop legacy columns from companies table that moved to company_members.
+    
+    These columns (discord_id, discord_username, discord_avatar) were part of
+    migration 002 but are no longer in the current schema. They now live in
+    company_members. DROP is safe because data was already migrated in 004.
+    """
+    legacy_cols = ["discord_id", "discord_username", "discord_avatar"]
+    for col in legacy_cols:
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'companies' AND column_name = %s",
+            (col,),
+        )
+        if cursor.fetchone() is not None:
+            try:
+                # First drop the NOT NULL constraint by making it nullable
+                cursor.execute(
+                    f"ALTER TABLE companies ALTER COLUMN {col} DROP NOT NULL"
+                )
+                logger.debug("Migration: removed NOT NULL from companies.%s", col)
+            except Exception:
+                logger.debug("Migration: %s already nullable or cannot drop NOT NULL", col)
+            try:
+                # Drop the unique constraint on discord_id if it exists
+                cursor.execute(
+                    "SELECT constraint_name FROM information_schema.table_constraints "
+                    "WHERE table_name = 'companies' AND constraint_type = 'UNIQUE' "
+                    "AND constraint_name = 'uq_companies_discord_id'"
+                )
+                if cursor.fetchone() is not None:
+                    cursor.execute("ALTER TABLE companies DROP CONSTRAINT uq_companies_discord_id")
+                    logger.debug("Migration: dropped uq_companies_discord_id constraint.")
+            except Exception:
+                logger.debug("Migration: could not drop uq_companies_discord_id (may not exist)")
+            conn.commit()
 
 
 def _run_sqlite_migrations(conn) -> None:
