@@ -6,6 +6,9 @@
 # files to the API when analyzing or editing code.
 #
 # Syntax: Same as .gitignore (glob patterns)
+#
+# NOTE: Do NOT add patterns here that would block editing CI/CD workflows
+# (.github/) or the .clineignore itself.
 # =============================================================================
 
 # ── Lockfiles (giant & irrelevant for code understanding) ─────────────────
@@ -17,9 +20,6 @@ docker-compose.yml
 .dockerignore
 Makefile
 sonar-project.properties
-
-# ── CI/CD workflows (rarely relevant during code work) ───────────────────
-.github/
 
 # ── Database migrations (only needed for schema changes) ─────────────────
 alembic/
