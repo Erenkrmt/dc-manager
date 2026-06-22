@@ -102,7 +102,7 @@ def resolve_company() -> SessionContext | None:
         return None
 
     display_name = company.get("discord_username") or company.get("company_name") or "User"
-    print(f"\n✅ Authenticated as {display_name}")
+    print("\n✅ Authentication successful")
 
     ctx = SessionContext(company_id=company_id, is_read_only=is_read_only)
     if ctx.is_read_only:
