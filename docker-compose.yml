@@ -40,6 +40,8 @@ services:
       - SSL_ENABLED=${SSL_ENABLED:-false}
       - SSL_CERTFILE=${SSL_CERTFILE:-}
       - SSL_KEYFILE=${SSL_KEYFILE:-}
+      - RATE_LIMIT=${RATE_LIMIT:-100/minute}
+      - RATE_LIMIT_PER=${RATE_LIMIT_PER:-ip}
       # PostgreSQL connection
       - DATABASE_URL=${DATABASE_URL:-}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
