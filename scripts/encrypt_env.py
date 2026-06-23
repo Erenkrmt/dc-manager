@@ -61,7 +61,15 @@ def main():
     env["SOPS_AGE_KEY_FILE"] = str(key_file)
 
     result = subprocess.run(
-        [sops_path, "--encrypt", "--input-type", "dotenv", "--output-type", "dotenv", str(env_file)],
+        [
+            sops_path,
+            "--encrypt",
+            "--input-type",
+            "dotenv",
+            "--output-type",
+            "dotenv",
+            str(env_file),
+        ],
         capture_output=True,
         text=True,
         env=env,

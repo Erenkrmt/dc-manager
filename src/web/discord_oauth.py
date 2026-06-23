@@ -38,9 +38,7 @@ async def exchange_code(code: str) -> dict | None:
     Returns the token data dict, or None on failure.
     """
     if not _settings.DISCORD_CLIENT_ID or not _settings.DISCORD_CLIENT_SECRET:
-        logger.error(
-            "Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)"
-        )
+        logger.error("Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)")
         return None
 
     data = {
@@ -61,9 +59,7 @@ async def exchange_code(code: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error(
-                    "Discord token exchange failed: %s %s", resp.status_code, resp.text
-                )
+                logger.error("Discord token exchange failed: %s %s", resp.status_code, resp.text)
                 return None
             return resp.json()
     except Exception:
@@ -85,9 +81,7 @@ async def get_user_info(access_token: str) -> dict | None:
                 timeout=10,
             )
             if resp.status_code != 200:
-                logger.error(
-                    "Discord user info fetch failed: %s %s", resp.status_code, resp.text
-                )
+                logger.error("Discord user info fetch failed: %s %s", resp.status_code, resp.text)
                 return None
             return resp.json()
     except Exception:
@@ -104,9 +98,7 @@ def exchange_code_sync(code: str) -> dict | None:
     Safe to call from Streamlit's event loop context.
     """
     if not _settings.DISCORD_CLIENT_ID or not _settings.DISCORD_CLIENT_SECRET:
-        logger.error(
-            "Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)"
-        )
+        logger.error("Discord OAuth not configured (missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET)")
         return None
 
     data = {
@@ -162,6 +154,44 @@ def get_user_info_sync(access_token: str) -> dict | None:
             return resp.json()
     except Exception:
         logger.exception("Discord user info (sync) error")
+        return None
+
+
+def get_username_by_discord_id(discord_id: str) -> str | None:
+    """
+    Look up a Discord user's global username by their Discord ID.
+    Uses the Discord Bot Token (if configured) via the bot API.
+    If no bot token is set, returns None gracefully.
+
+    This is used by the admin panel to auto-fill display names when
+    manually adding a member by Discord ID.
+    """
+    if not _settings.DISCORD_BOT_TOKEN:
+        logger.info("DISCORD_BOT_TOKEN not set — cannot resolve Discord username by ID.")
+        return None
+
+    headers = {
+        "Authorization": f"Bot {_settings.DISCORD_BOT_TOKEN}",
+    }
+    try:
+        with httpx.Client() as client:
+            resp = client.get(
+                f"{DISCORD_API_BASE}/users/{discord_id}",
+                headers=headers,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Discord user lookup for %s failed: %s %s",
+                    discord_id,
+                    resp.status_code,
+                    resp.text,
+                )
+                return None
+            user_data = resp.json()
+            return user_data.get("global_name") or user_data.get("username", None)
+    except Exception:
+        logger.exception("Discord user lookup error for %s", discord_id)
         return None
 
 

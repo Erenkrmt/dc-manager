@@ -9,14 +9,21 @@ Installs:
 OS-agnostic: works on Windows, macOS, and Linux.
 """
 
-import subprocess
 import sys
 from pathlib import Path
 
 
 HOOKS = [
-    ("pre-commit", "scripts/pre-commit-hook.py", ".env will auto-encrypt → .env.encrypted on every commit."),
-    ("post-merge", "scripts/post-merge-hook.py", ".env will auto-decrypt ← .env.encrypted after every pull/merge/checkout."),
+    (
+        "pre-commit",
+        "scripts/pre-commit-hook.py",
+        ".env will auto-encrypt → .env.encrypted on every commit.",
+    ),
+    (
+        "post-merge",
+        "scripts/post-merge-hook.py",
+        ".env will auto-decrypt ← .env.encrypted after every pull/merge/checkout.",
+    ),
 ]
 
 

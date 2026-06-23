@@ -6,7 +6,7 @@ import logging
 
 from src.core.market_deal import MarketDeal, stash_ingot_equivalents
 from src.utils.input_helpers import safe_float_input, input_unit
-from src.utils.session import SessionContext
+from src.utils.cli_auth import SessionContext
 
 logger = logging.getLogger(__name__)
 
@@ -37,32 +37,22 @@ def load_materials_from_stash(
     stash = ctx.load_stash()
     total_iron, total_gold, total_diamond = stash_ingot_equivalents(stash)
 
-    if (
-        stash
-        and stash.get("updated_at") != "never"
-        and (total_iron or total_gold or total_diamond)
-    ):
+    if stash and stash.get("updated_at") != "never" and (total_iron or total_gold or total_diamond):
         used_stash = True
         print("\n📦 Loaded from stash (you can override individual values):")
-        print(
-            f"💎 DIAMONDS: {stash['diamond_blocks']} blocks, {stash['diamond_items']} items"
-        )
+        print(f"💎 DIAMONDS: {stash['diamond_blocks']} blocks, {stash['diamond_items']} items")
         print("   (Enter raw numbers – not stacks. Leave empty to keep stash value.)")
         di_blocks = _override_int("   Diamond blocks: ", stash["diamond_blocks"])
         di_items = _override_int("   Diamond items:  ", stash["diamond_items"])
         total_diamond = di_blocks * 9 + di_items
 
-        print(
-            f"\n⬜ IRON: {stash['iron_blocks']} blocks, {stash['iron_ingots']} ingots"
-        )
+        print(f"\n⬜ IRON: {stash['iron_blocks']} blocks, {stash['iron_ingots']} ingots")
         print("   (Enter raw numbers – not stacks. Leave empty to keep stash value.)")
         ir_blocks = _override_int("   Iron blocks: ", stash["iron_blocks"])
         ir_ingots = _override_int("   Iron ingots: ", stash["iron_ingots"])
         total_iron = ir_blocks * 9 + ir_ingots
 
-        print(
-            f"\n🟨 GOLD: {stash['gold_blocks']} blocks, {stash['gold_ingots']} ingots"
-        )
+        print(f"\n🟨 GOLD: {stash['gold_blocks']} blocks, {stash['gold_ingots']} ingots")
         print("   (Enter raw numbers – not stacks. Leave empty to keep stash value.)")
         go_blocks = _override_int("   Gold blocks: ", stash["gold_blocks"])
         go_ingots = _override_int("   Gold ingots: ", stash["gold_ingots"])

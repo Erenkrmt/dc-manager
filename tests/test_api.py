@@ -19,7 +19,7 @@ from src.core import settings
 
 def _create_company() -> tuple:
     """Create a test company and return (company_dict, api_key)."""
-    company = db.get_or_create_company_by_discord("test_discord_id", "TestUser", "")
+    company, _ = db.get_or_create_company_by_discord("test_discord_id", "TestUser", "")
     # Remove expiry so it has full write access
     db.update_company_access(company["id"], 30)
     return company, company["api_key"]
@@ -71,7 +71,6 @@ class TestAuthEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert data["id"] == company["id"]
-        assert data["discord_username"] == "TestUser"
 
     def test_auth_me_with_invalid_key(self, client):
         """GET /auth/me should return 401 when no API key provided."""
@@ -92,14 +91,11 @@ class TestAuthEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert data["api_key"].startswith("dc_")
-        assert data["discord_username"] == "NewUser"
 
     def test_update_company_name(self, client):
         """PUT /auth/name should update the display name."""
         _, api_key = _create_company()
-        r = client.put(
-            "/auth/name", params={"name": "My Corp"}, headers={"X-API-Key": api_key}
-        )
+        r = client.put("/auth/name", params={"name": "My Corp"}, headers={"X-API-Key": api_key})
         assert r.status_code == 200
         data = r.json()
         assert data["company_name"] == "My Corp"
@@ -165,7 +161,6 @@ class TestStashEndpoint:
     def test_set_auto_subtract(self, client):
         """PUT /stash/auto_subtract should toggle the setting."""
         _, api_key = _create_company()
-        db.set_auto_subtract(False)
         r = client.put(
             "/stash/auto_subtract",
             params={"enabled": True},
@@ -234,9 +229,7 @@ class TestPricesEndpoint:
         def _mock_fetch_live_prices(*args, **kwargs):
             return (5.0, 10.0, 20.0, {})
 
-        monkeypatch.setattr(
-            "src.core.market_deal.fetch_live_prices", _mock_fetch_live_prices
-        )
+        monkeypatch.setattr("src.core.market_deal.fetch_live_prices", _mock_fetch_live_prices)
         r = client.get("/prices")
         assert r.status_code == 200
         data = r.json()
@@ -257,9 +250,7 @@ class TestStashMutations:
     def test_save_stash_via_api(self, client):
         """PUT /stash should save stash."""
         _, api_key = _create_company()
-        r = client.put(
-            "/stash", json={"iron_blocks": 42}, headers={"X-API-Key": api_key}
-        )
+        r = client.put("/stash", json={"iron_blocks": 42}, headers={"X-API-Key": api_key})
         assert r.status_code == 200
         data = r.json()
         assert data["iron_blocks"] == 42

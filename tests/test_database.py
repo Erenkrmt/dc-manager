@@ -43,10 +43,11 @@ class TestCompanyManagement:
 
     def test_get_or_create_company_creates_new(self):
         """A new Discord user should get a company with a trial."""
-        company = db.get_or_create_company_by_discord("12345", "TestUser", "")
+        company, member = db.get_or_create_company_by_discord("12345", "TestUser", "")
         assert company is not None
-        assert company["discord_id"] == "12345"
-        assert company["discord_username"] == "TestUser"
+        assert member is not None
+        assert member["discord_id"] == "12345"
+        assert member["discord_username"] == "TestUser"
         assert company["api_key"].startswith("dc_")
         assert company["trial_used"] == 1
         assert company["access_expires_at"] is not None  # trial set
@@ -55,15 +56,15 @@ class TestCompanyManagement:
         """Calling again with the same Discord ID should return the same company.
         The API key is only returned on creation (raw); existing lookups return empty string.
         """
-        c1 = db.get_or_create_company_by_discord("12345", "TestUser")
-        c2 = db.get_or_create_company_by_discord("12345", "TestUser")
+        (c1, _) = db.get_or_create_company_by_discord("12345", "TestUser")
+        (c2, _) = db.get_or_create_company_by_discord("12345", "TestUser")
         assert c1["id"] == c2["id"]
         assert c1["api_key"].startswith("dc_")  # raw key on creation
         assert c2["api_key"] == ""  # masked on existing lookup
 
     def test_get_company_by_api_key(self):
         """Lookup by API key should return the company."""
-        company = db.get_or_create_company_by_discord("67890", "AnotherUser")
+        company, _ = db.get_or_create_company_by_discord("67890", "AnotherUser")
         found = db.get_company_by_api_key(company["api_key"])
         assert found is not None
         assert found["id"] == company["id"]
@@ -74,10 +75,10 @@ class TestCompanyManagement:
 
     def test_get_company_by_id(self):
         """Lookup by database ID."""
-        company = db.get_or_create_company_by_discord("111", "User1")
+        company, _ = db.get_or_create_company_by_discord("111", "User1")
         found = db.get_company_by_id(company["id"])
         assert found is not None
-        assert found["discord_id"] == "111"
+        assert found["company_name"] is not None
 
     def test_list_all_companies(self):
         """list_all_companies should return all companies."""
@@ -88,14 +89,14 @@ class TestCompanyManagement:
 
     def test_update_company_access(self):
         """Extending access should update the expiry."""
-        company = db.get_or_create_company_by_discord("999", "ExpiryTest")
+        company, _ = db.get_or_create_company_by_discord("999", "ExpiryTest")
         db.update_company_access(company["id"], 30)
         updated = db.get_company_by_id(company["id"])
         assert updated["access_expires_at"] is not None
 
     def test_deactivate_company(self):
         """Deactivating should set is_active=0."""
-        company = db.get_or_create_company_by_discord("777", "DeactTest")
+        company, _ = db.get_or_create_company_by_discord("777", "DeactTest")
         db.deactivate_company(company["id"])
         # Check by raw lookup (get_company_by_api_key filters active)
         direct = db.get_company_by_id(company["id"])
@@ -103,7 +104,7 @@ class TestCompanyManagement:
 
     def test_regenerate_api_key(self):
         """Regenerating should return a new key."""
-        company = db.get_or_create_company_by_discord("444", "KeyRegen")
+        company, _ = db.get_or_create_company_by_discord("444", "KeyRegen")
         old_key = company["api_key"]
         new_key = db.regenerate_api_key(company["id"])
         assert new_key != old_key
@@ -111,7 +112,7 @@ class TestCompanyManagement:
 
     def test_check_company_access_full(self):
         """A company with no expiry should have full access."""
-        company = db.get_or_create_company_by_discord("555", "FullAccess")
+        company, _ = db.get_or_create_company_by_discord("555", "FullAccess")
         # Remove expiry to simulate permanent access
         db.update_company_access(company["id"], 0)
         is_active, is_read_only = db.check_company_access(company["id"])
@@ -120,7 +121,7 @@ class TestCompanyManagement:
 
     def test_update_company_name(self):
         """Company display name should be updatable."""
-        company = db.get_or_create_company_by_discord("888", "NameTest")
+        company, _ = db.get_or_create_company_by_discord("888", "NameTest")
         db.update_company_name(company["id"], "Super Corp")
         updated = db.get_company_by_id(company["id"])
         assert updated["company_name"] == "Super Corp"
@@ -276,8 +277,8 @@ class TestAddToStash:
 
     def test_stash_per_company_isolation(self):
         """Two different companies should have independent stashes."""
-        c1 = db.get_or_create_company_by_discord("c1", "Comp1")
-        c2 = db.get_or_create_company_by_discord("c2", "Comp2")
+        c1, _ = db.get_or_create_company_by_discord("c1", "Comp1")
+        c2, _ = db.get_or_create_company_by_discord("c2", "Comp2")
 
         db.save_stash({"iron_blocks": 100}, company_id=c1["id"])
         db.save_stash({"iron_ingots": 50}, company_id=c2["id"])

@@ -101,13 +101,9 @@ def resolve_company() -> SessionContext | None:
         print("\n❌ Your account is inactive. Contact the admin.")
         return None
 
-    print(
-        f"\n✅ Authenticated as {company.get('discord_username', company.get('company_name', 'User'))}"
-    )
+    print("\n✅ Authentication successful")
 
     ctx = SessionContext(company_id=company_id, is_read_only=is_read_only)
     if ctx.is_read_only:
-        print(
-            "⚠️  **Read-only mode** — your access has expired. Contact Fishy Business to renew."
-        )
+        print("⚠️  **Read-only mode** — your access has expired. Contact Fishy Business to renew.")
     return ctx

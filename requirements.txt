@@ -1,4 +1,7 @@
-# Docker dependencies – merge of pyproject.toml + psycopg2/gunicorn
+# Docker production dependencies – only what's needed at runtime.
+# Dev dependencies (ruff, pytest-cov, pre-commit) are excluded.
+# httpx2 was removed – it's not a real PyPI package.
+# gunicorn was removed – the app runs via scripts/run.py (uvicorn), not gunicorn.
 python-dotenv>=1.0.0
 requests>=2.28.0
 streamlit>=1.58.0
@@ -6,7 +9,4 @@ pandas>=2.0.0
 slowapi>=0.1.9
 fastapi>=0.137.0
 httpx>=0.27.0
-httpx2>=0.1.0
-pytest-cov>=7.1.0
 psycopg2-binary>=2.9.0
-gunicorn>=21.2.0

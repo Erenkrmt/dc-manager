@@ -48,6 +48,13 @@ Before any task, read `REPO_OVERVIEW.md` for full context on the project structu
 10. **httpx** is required for Discord OAuth — installed as dependency in pyproject.toml
 11. **Discord OAuth callback** handled via `st.query_params` — Streamlit's built-in url param capture
 
+## Docker Hub rate limit prevention
+- **Pull-through cache** lives at `stacks/docker-hub-cache/` in the docker-compose repo — deploy it on the host to cache all Docker Hub pulls locally
+- **CI workflows** log into Docker Hub via `secrets.DOCKERHUB_USERNAME`/`secrets.DOCKERHUB_TOKEN` before any `docker build` — this is required in both `ci.yml` and `docker-publish.yml`
+- **Required secrets** on GitHub: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`
+- **`uv` Python cache** is already set up via `actions/cache@v4` in CI to avoid re-downloading Python binaries
+- **Base image layers** are cached after first pull when the pull-through cache is active
+
 ## Testing
 - Tests use `pytest` with temp SQLite DB fixtures
 - Always use `monkeypatch` to redirect `DB_FILE` to a temp path in tests

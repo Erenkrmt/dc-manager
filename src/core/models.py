@@ -5,7 +5,7 @@ Used by Alembic for migrations, and can replace raw SQL in database.py.
 """
 
 from sqlalchemy import Column, Integer, Float, Text, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
@@ -18,23 +18,47 @@ class Company(Base):
     __tablename__ = "companies"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    discord_id = Column(Text, unique=True, nullable=False)
-    discord_username = Column(Text, nullable=False)
-    discord_avatar = Column(Text, default="")
     api_key = Column(Text, unique=True, nullable=False)
     company_name = Column(Text, default="")
     access_expires_at = Column(Text, nullable=True)  # NULL = never expires
     is_active = Column(Integer, default=1)
     trial_used = Column(Integer, default=0)
-    session_token = Column(Text, default="")
-    session_created_at = Column(Text, nullable=True)
     public_stash_token = Column(Text, default="")
     tier = Column(Text, default="free")  # "free" or "premium"
     created_at = Column(Text, nullable=False)
     updated_at = Column(Text, nullable=False)
 
+    members = relationship("CompanyMember", back_populates="company")
+
+
+class CompanyMember(Base):
+    """A user (Discord account) that belongs to a company.
+
+    One company can have multiple members (owner, admins, members).
+    One Discord user can belong to multiple companies.
+    Enforced by UNIQUE(company_id, discord_id).
+    """
+
+    __tablename__ = "company_members"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    discord_id = Column(Text, nullable=False)  # NOT globally unique
+    discord_username = Column(Text, nullable=False)
+    discord_avatar = Column(Text, default="")
+    role = Column(Text, default="member")  # 'owner', 'admin', 'member'
+    session_token = Column(Text, default="")
+    session_created_at = Column(Text, nullable=True)
+    created_at = Column(Text, nullable=False)
+    updated_at = Column(Text, nullable=False)
+
+    company = relationship("Company", back_populates="members")
+
+    __table_args__ = (UniqueConstraint("company_id", "discord_id", name="uq_company_member"),)
+
 
 _COMPANIES_ID = "companies.id"
+_COMPANY_MEMBERS_ID = "company_members.id"
 
 
 class Deal(Base):

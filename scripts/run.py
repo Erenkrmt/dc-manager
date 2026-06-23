@@ -38,8 +38,7 @@ def main() -> None:
     if ssl_enabled:
         if not ssl_certfile or not ssl_keyfile:
             logger.error(
-                "SSL_ENABLED=true but SSL_CERTFILE and/or SSL_KEYFILE are empty. "
-                "Set both paths or disable SSL."
+                "SSL_ENABLED=true but SSL_CERTFILE and/or SSL_KEYFILE are empty. Set both paths or disable SSL."
             )
             sys.exit(1)
         if not os.path.isfile(ssl_certfile):
@@ -52,14 +51,29 @@ def main() -> None:
         # uvicorn SSL flags
         api_ssl_args = ["--ssl-certfile", ssl_certfile, "--ssl-keyfile", ssl_keyfile]
         # streamlit SSL flags
-        streamlit_ssl_args = ["--server.sslCertFile", ssl_certfile, "--server.sslKeyFile", ssl_keyfile]
+        streamlit_ssl_args = [
+            "--server.sslCertFile",
+            ssl_certfile,
+            "--server.sslKeyFile",
+            ssl_keyfile,
+        ]
     else:
         logger.info("SSL is DISABLED — serving over plain HTTP")
     # ─────────────────────────────────────────────────────────────────
 
     # Start FastAPI server
     api_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "src.web.api:app", "--host", "0.0.0.0", "--port", api_port, *api_ssl_args],  # nosec - S8392: required for Docker container access
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "src.web.api:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            api_port,
+            *api_ssl_args,
+        ],  # nosec - S8392: required for Docker container access
         cwd=project_root,
     )
     logger.info("FastAPI server started on port %s (PID %d)", api_port, api_process.pid)
@@ -70,11 +84,19 @@ def main() -> None:
     # Start Streamlit
     streamlit_process = subprocess.Popen(
         [
-            sys.executable, "-m", "streamlit", "run", "src/web/app.py",
-            "--server.port", streamlit_port,
-            "--server.address", "0.0.0.0",  # nosec - S8392: required for Docker container access
-            "--server.headless", "true",
-            "--browser.gatherUsageStats", "false",
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            "src/web/app.py",
+            "--server.port",
+            streamlit_port,
+            "--server.address",
+            "0.0.0.0",  # nosec - S8392: required for Docker container access
+            "--server.headless",
+            "true",
+            "--browser.gatherUsageStats",
+            "false",
             *streamlit_ssl_args,
         ],
         cwd=project_root,
