@@ -99,6 +99,9 @@ jobs:
     name: Cache Report
     runs-on: self-hosted
     needs: build-and-push
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
