@@ -112,7 +112,7 @@ jobs:
           tags: ${{ env.IMAGE_NAME }}:ci-${{ github.sha }}
           cache-from: type=gha,scope=dc-trade
           cache-to: type=gha,mode=max,scope=dc-trade
-          tags: ${{ env.IMAGE_NAME }}:test-${{ github.sha }}
+
 
   sonarqube:
     name: Code Quality Scan
