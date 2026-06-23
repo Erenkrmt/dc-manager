@@ -14,3 +14,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^\.env$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        name: ruff-pre-push
+        args: [--fix, --exit-non-zero-on-fix]
+        stages: [pre-push]
+      - id: ruff-format
+        name: ruff-format-pre-push
+        args: [--check]
+        stages: [pre-push]

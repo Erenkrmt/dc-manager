@@ -234,7 +234,67 @@ docker compose --profile db up -d
 
 ---
 
-## 12. Common Gotchas / Notes
+## 12. CI/CD & Docker Hub Rate Limits
+
+### The Problem
+
+Self-hosted GitHub Actions runners pull base images (like `python:3.11-slim`) from Docker Hub on every CI run. With **5 concurrent runners** across 2 repos, the runners frequently hit Docker Hub's rate limits:
+
+| Pull Type | Limit |
+|-----------|-------|
+| Anonymous (no login) | **100 pulls / 6 hours** |
+| Authenticated (logged in) | **200 pulls / 6 hours** |
+
+Each `docker build` pulls the full Python base image layers — with multiple runners, the limit is exhausted quickly.
+
+### The Solution (Two Layers)
+
+#### Layer 1: Docker Hub Pull-Through Cache (Infrastructure)
+
+**Deploy a local registry mirror** on the homelab host (from the `docker-compose` repo):
+
+```bash
+cd /path/to/docker-compose/stacks/docker-hub-cache
+docker compose up -d
+sudo ./setup-daemon.sh   # Configures Docker daemon to use the mirror
+```
+
+This caches ALL Docker Hub images locally after the first pull. Benefits:
+- Subsequent pulls of the same tag are **instant** (no network)
+- **All containers** benefit, not just runners
+- Cache persists across container restarts
+
+#### Layer 2: Authenticated Pulls in CI Workflows
+
+Both CI workflows (`ci.yml` and `docker-publish.yml`) now log into Docker Hub before `docker build`:
+
+```yaml
+- name: Log in to Docker Hub
+  uses: docker/login-action@v3
+  with:
+    registry: docker.io
+    username: ${{ secrets.DOCKERHUB_USERNAME }}
+    password: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+This doubles your rate limit (200/6h vs 100/6h) and works synergistically with the pull-through cache.
+
+### Required Secrets
+
+Set these in your GitHub repository settings (Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | Docker Hub access token (or password) |
+
+### uv Python Cache
+
+In addition to Docker, the CI workflows use `actions/cache@v4` for `uv`'s Python downloads. This caches installed Python binaries between runs, so `uv python install` doesn't re-download from the internet on every run.
+
+---
+
+## 13. Common Gotchas / Notes
 
 1. **DC_API_KEY is required** — get it from https://api.democracycraft.net. Without it, the CLI/API will exit with an error.
 2. **Database auto-creates** on first run (`data/dc_trade.db` for SQLite).

@@ -39,11 +39,7 @@ def _auto_decrypt_env() -> None:
 
     # Resolve age key file
     key_file_env = os.environ.get("SOPS_AGE_KEY_FILE")
-    key_file = (
-        Path(key_file_env)
-        if key_file_env
-        else Path.home() / ".config" / "sops" / "age" / "keys.txt"
-    )
+    key_file = Path(key_file_env) if key_file_env else Path.home() / ".config" / "sops" / "age" / "keys.txt"
     if not key_file.exists():
         return  # No age key found; settings will use defaults
 
@@ -116,10 +112,10 @@ class Settings:
     # Discord OAuth 2.0 — set these in .env for production
     DISCORD_CLIENT_ID: str = os.getenv("DISCORD_CLIENT_ID", "")
     DISCORD_CLIENT_SECRET: str = os.getenv("DISCORD_CLIENT_SECRET", "")
+    # Discord Bot Token (optional) — used for admin Discord user lookups by ID
+    DISCORD_BOT_TOKEN: str = os.getenv("DISCORD_BOT_TOKEN", "")
     # Comma-separated list of Discord user IDs that have admin access
-    ADMIN_DISCORD_IDS: list[str] = [
-        x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip()
-    ]
+    ADMIN_DISCORD_IDS: list[str] = [x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip()]
     # Trial duration in days (immediate on first Discord login)
     TRIAL_DAYS: int = int(os.getenv("TRIAL_DAYS", "3"))
     # Session secret for signing session tokens (auto-generated if empty)
