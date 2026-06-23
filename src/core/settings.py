@@ -113,6 +113,9 @@ class Settings:
     NUGGETS_PER_INGOT: int = 9
 
     # ── Multi-company / Auth ────────────────────────────────────────────
+    # ── Rate Limiting Settings ───────────────────────────────────────────
+    RATE_LIMIT: str = os.getenv("RATE_LIMIT", "100/minute")
+    RATE_LIMIT_PER: str = os.getenv("RATE_LIMIT_PER", "ip")
     # Discord OAuth 2.0 — set these in .env for production
     DISCORD_CLIENT_ID: str = os.getenv("DISCORD_CLIENT_ID", "")
     DISCORD_CLIENT_SECRET: str = os.getenv("DISCORD_CLIENT_SECRET", "")

@@ -20,6 +20,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from src.core import database as db
 from src.core.settings import get_settings
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from src.web.rate_limit import get_identifier
+from fastapi.responses import JSONResponse
 
 _settings = get_settings()
 
@@ -40,9 +45,22 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+# ── Rate limiting setup ───────────────────────────────────────────────
+limiter = Limiter(key_func=get_identifier, default_limits=[_settings.RATE_LIMIT])
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 
 
-# ---------------------------------------------------------------------------
+
+# ── Rate limit exception handling ────────────────────────────────────────
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded", "retry_after": exc.retry_after},
+        headers={"Retry-After": str(exc.retry_after)},
+    )
+
 # Auth middleware — extract company_id from X-API-Key header
 # ---------------------------------------------------------------------------
 
