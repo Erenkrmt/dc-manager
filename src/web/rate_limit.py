@@ -1,4 +1,3 @@
-import os
 from fastapi import Request
 from src.core.settings import get_settings
 
