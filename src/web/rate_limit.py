@@ -3,6 +3,7 @@ from src.core.settings import get_settings
 
 _settings = get_settings()
 
+
 def get_identifier(request: Request) -> str:
     """Return a unique identifier for rate limiting.
 
