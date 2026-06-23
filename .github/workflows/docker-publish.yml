@@ -31,28 +31,6 @@ jobs:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   build-and-push:
-    # existing steps above...
-    # (no change)
-
-  cache-report:
-    name: Cache Report
-    runs-on: self-hosted
-    needs: build-and-push
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install GitHub CLI
-        run: |
-          sudo apt-get update && sudo apt-get install -y gh
-      - name: List GitHub caches
-        run: |
-          gh auth status
-          gh actions-cache list -R ${{ github.repository }} > cache-report.txt
-      - name: Upload cache report
-        uses: actions/upload-artifact@v4
-        with:
-          name: cache-report
-          path: cache-report.txt
     runs-on: self-hosted
     needs: ci
     timeout-minutes: 15
@@ -108,6 +86,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=dc-trade
           provenance: true
           sbom: true
+
       - name: Show Docker cache status
         run: |
           echo "Cache hit: ${{ steps.build-and-push.outputs.cache-hit }}"
@@ -118,3 +97,23 @@ jobs:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.build-and-push.outputs.digest }}
           push-to-registry: true
+
+  cache-report:
+    name: Cache Report
+    runs-on: self-hosted
+    needs: build-and-push
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update && sudo apt-get install -y gh
+      - name: List GitHub caches
+        run: |
+          gh auth status
+          gh actions-cache list -R ${{ github.repository }} > cache-report.txt
+      - name: Upload cache report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-report
+          path: cache-report.txt
