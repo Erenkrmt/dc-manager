@@ -1,10 +1,12 @@
 import os
+
 os.environ["RATE_LIMIT"] = "1/second"
 
 from fastapi.testclient import TestClient
 from src.web.api import app
 
 client = TestClient(app)
+
 
 def test_rate_limit_exceeded():
     # Send requests quickly to exceed the default limit (e.g., 100/minute).
