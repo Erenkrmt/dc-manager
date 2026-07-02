@@ -1,6 +1,6 @@
 # =============================================================================
 # Dockerfile – DC Trade Toolbox
-# Optimized multi-stage build using uv and clean runtime image
+# Optimized multi-stage build using uv.lock for deterministic production builds
 # =============================================================================
 
 # ---- Builder stage ----
@@ -11,12 +11,12 @@ WORKDIR /app
 # Copy uv binary from the official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# Copy dependency definition
-COPY requirements.txt ./
+# Copy project configuration and lockfile
+COPY pyproject.toml uv.lock ./
 
-# Install python dependencies to a target directory
+# Install project dependencies from the lockfile
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --target /install -r requirements.txt
+    uv sync --frozen --no-dev --no-install-project
 
 # ---- Runtime stage ----
 FROM python:3.11-slim AS runtime
@@ -26,8 +26,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Copy only the installed dependencies from builder
-COPY --from=builder /install /usr/local/lib/python3.11/site-packages
+# Copy only the installed dependencies from builder's virtual environment
+COPY --from=builder /app/.venv/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 
 # Copy only required source files
 COPY src/ ./src/

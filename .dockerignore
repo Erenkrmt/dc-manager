@@ -37,7 +37,6 @@ Dockerfile
 .python-version
 alembic.ini
 Makefile
-uv.lock
 
 # Tests (not needed at runtime)
 tests/
