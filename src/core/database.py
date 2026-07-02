@@ -12,8 +12,17 @@ import hashlib
 import hmac
 import urllib.parse
 import re
+import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
+
+try:
+    import psycopg2
+    import psycopg2.extras
+    from psycopg2.extensions import quote_ident
+except ImportError:
+    psycopg2 = None
+    quote_ident = None
 
 from src.core.settings import get_settings
 
@@ -30,16 +39,6 @@ logger = logging.getLogger(__name__)
 
 # ── Detect backend ──────────────────────────────────────────────────────────
 _USE_POSTGRES = bool(_settings.DATABASE_URL)
-
-import sqlite3
-
-try:
-    import psycopg2
-    import psycopg2.extras
-    from psycopg2.extensions import quote_ident
-except ImportError:
-    psycopg2 = None
-    quote_ident = None
 
 if _USE_POSTGRES and not psycopg2:
     logger.error("DATABASE_URL is set but psycopg2 is not installed. Install it with: pip install psycopg2-binary")

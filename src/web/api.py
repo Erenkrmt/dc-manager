@@ -49,6 +49,7 @@ app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
 
+
 # ── Rate limit exception handling ────────────────────────────────────────
 @app.exception_handler(RateLimitExceeded)
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
@@ -64,7 +65,6 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
         retry_after = getattr(exc, "retry_after", 60)
         response.headers["Retry-After"] = str(retry_after)
     return response
-
 
 # Auth middleware — extract company_id from X-API-Key header
 # ---------------------------------------------------------------------------
