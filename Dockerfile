@@ -16,7 +16,7 @@ COPY pyproject.toml uv.lock ./
 
 # Install project dependencies from the lockfile
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project --link-mode=copy
 
 # ---- Runtime stage ----
 FROM python:3.11-slim AS runtime
