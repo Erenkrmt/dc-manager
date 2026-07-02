@@ -116,7 +116,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh auth status
-          gh actions-cache list -R ${{ github.repository }} > cache-report.txt
+          gh cache list -R ${{ github.repository }} > cache-report.txt
 
       - name: Upload cache report
         uses: actions/upload-artifact@v4
