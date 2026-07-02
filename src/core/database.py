@@ -82,12 +82,16 @@ def _create_pg_database_if_not_exists(database_url: str, sslmode: str) -> bool:
         try:
             if database_url.startswith(("postgres://", "postgresql://", "POSTGRES://", "POSTGRESQL://")):
                 parsed = urllib.parse.urlsplit(database_url)
-                fallback_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, f"/{fallback_db}", parsed.query, parsed.fragment))
+                fallback_url = urllib.parse.urlunsplit(
+                    (parsed.scheme, parsed.netloc, f"/{fallback_db}", parsed.query, parsed.fragment)
+                )
             else:
                 match = re.search(r"(\bdbname\s*=\s*)([^\s]+)", database_url)
-                fallback_url = database_url[:match.start(2)] + fallback_db + database_url[match.end(2):]
+                fallback_url = database_url[: match.start(2)] + fallback_db + database_url[match.end(2) :]
 
-            logger.info("Connecting to maintenance database '%s' to create target database '%s'...", fallback_db, target_db)
+            logger.info(
+                "Connecting to maintenance database '%s' to create target database '%s'...", fallback_db, target_db
+            )
             conn = psycopg2.connect(fallback_url, sslmode=sslmode)
             conn.autocommit = True
             try:

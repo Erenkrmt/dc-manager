@@ -35,6 +35,23 @@ def main():
         print("❌ .git/hooks directory not found. Are you in a git repository?")
         sys.exit(1)
 
+    # Erkennen, ob wir in einer virtuellen Umgebung sind
+    import os
+
+    venv_path = os.environ.get("VIRTUAL_ENV")
+    python_executable = "python3"  # Standard-Fallback
+
+    if venv_path:
+        # Unter Windows liegt die python.exe in 'Scripts', sonst in 'bin'
+        win_python = Path(venv_path) / "Scripts" / "python.exe"
+        unix_python = Path(venv_path) / "bin" / "python"
+
+        if win_python.exists():
+            # Git Bash benötigt Vorwärts-Slashes für den Shebang
+            python_executable = f"/{win_python.as_posix().replace(':', '')}"
+        elif unix_python.exists():
+            python_executable = str(unix_python)
+
     for hook_name, source_relpath, description in HOOKS:
         source = project_root / source_relpath
         target = hooks_dir / hook_name
@@ -43,14 +60,16 @@ def main():
             print(f"❌ {source} not found. Skipping {hook_name} hook.")
             continue
 
-        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-        target.chmod(0o755)  # Harmless on Windows
+        # Inhalt lesen und Shebang dynamisch anpassen
+        lines = source.read_text(encoding="utf-8").splitlines()
+        if lines and lines[0].startswith("#!"):
+            lines[0] = f"#!{python_executable}"
+
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        target.chmod(0o755)
 
         print(f"✅ Installed {hook_name} hook at {target}")
         print(f"   {description}")
-
-    print("\n🔗 Both hooks installed. To uninstall:")
-    print("   rm .git/hooks/pre-commit .git/hooks/post-merge")
 
 
 if __name__ == "__main__":
