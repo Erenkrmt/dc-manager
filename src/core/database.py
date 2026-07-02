@@ -10,8 +10,19 @@ import logging
 import secrets
 import hashlib
 import hmac
+import urllib.parse
+import re
+import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
+
+try:
+    import psycopg2
+    import psycopg2.extras
+    from psycopg2.extensions import quote_ident
+except ImportError:
+    psycopg2 = None
+    quote_ident = None
 
 from src.core.settings import get_settings
 
@@ -29,17 +40,75 @@ logger = logging.getLogger(__name__)
 # ── Detect backend ──────────────────────────────────────────────────────────
 _USE_POSTGRES = bool(_settings.DATABASE_URL)
 
-if _USE_POSTGRES:
-    try:
-        import psycopg2
-        import psycopg2.extras
-    except ImportError:
-        logger.error("DATABASE_URL is set but psycopg2 is not installed. Install it with: pip install psycopg2-binary")
-        raise
-else:
-    import sqlite3
+if _USE_POSTGRES and not psycopg2:
+    logger.error("DATABASE_URL is set but psycopg2 is not installed. Install it with: pip install psycopg2-binary")
+    raise
 
+if not _USE_POSTGRES:
     os.makedirs(os.path.dirname(_settings.DB_FILE) or ".", exist_ok=True)
+
+
+def _create_pg_database_if_not_exists(database_url: str, sslmode: str) -> bool:
+    """
+    Attempt to create the PostgreSQL database if it does not exist.
+    Connects to administrative maintenance databases ('postgres', 'template1')
+    to execute the CREATE DATABASE command.
+    """
+    if not database_url:
+        return False
+
+    target_db = None
+    if database_url.startswith(("postgres://", "postgresql://", "POSTGRES://", "POSTGRESQL://")):
+        parsed = urllib.parse.urlsplit(database_url)
+        target_db = parsed.path.lstrip("/")
+        fallback_dbs = ["postgres", "template1"]
+        if parsed.username and parsed.username not in fallback_dbs and parsed.username != target_db:
+            fallback_dbs.append(parsed.username)
+    else:
+        match = re.search(r"(\bdbname\s*=\s*)([^\s]+)", database_url)
+        if match:
+            target_db = match.group(2)
+            fallback_dbs = ["postgres", "template1"]
+        else:
+            return False
+
+    if not target_db:
+        logger.error("Could not determine target database name from DATABASE_URL.")
+        return False
+
+    for fallback_db in fallback_dbs:
+        if fallback_db == target_db:
+            continue
+        try:
+            if database_url.startswith(("postgres://", "postgresql://", "POSTGRES://", "POSTGRESQL://")):
+                parsed = urllib.parse.urlsplit(database_url)
+                fallback_url = urllib.parse.urlunsplit(
+                    (parsed.scheme, parsed.netloc, f"/{fallback_db}", parsed.query, parsed.fragment)
+                )
+            else:
+                match = re.search(r"(\bdbname\s*=\s*)([^\s]+)", database_url)
+                fallback_url = database_url[: match.start(2)] + fallback_db + database_url[match.end(2) :]
+
+            logger.info(
+                "Connecting to maintenance database '%s' to create target database '%s'...", fallback_db, target_db
+            )
+            conn = psycopg2.connect(fallback_url, sslmode=sslmode)
+            conn.autocommit = True
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (target_db,))
+                    if not cursor.fetchone():
+                        quoted_db = quote_ident(target_db, conn)
+                        cursor.execute(f"CREATE DATABASE {quoted_db}")
+                        logger.info("Successfully created database '%s'.", target_db)
+                    return True
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("Could not connect to or create database via maintenance db '%s': %s", fallback_db, e)
+
+    logger.error("Failed to create database '%s' using all available maintenance databases.", target_db)
+    return False
 
 
 def get_connection():
@@ -48,16 +117,30 @@ def get_connection():
         # Determine sslmode: explicit env var wins, else auto-detect
         _sslmode = _settings.DATABASE_SSLMODE
         if not _sslmode:
-            # Auto-detect: require for remote hosts, disable for local ones
+            # Auto-detect: prefer for remote hosts, disable for local ones
             _host = _settings.DATABASE_URL.split("@")[-1].split(":")[0]
-            _sslmode = "require" if _host not in ("postgres", "localhost", "127.0.0.1") else "disable"
-        conn = psycopg2.connect(
-            _settings.DATABASE_URL,
-            sslmode=_sslmode,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-        )
-        conn.autocommit = False
-        return conn
+            _sslmode = "prefer" if _host not in ("postgres", "localhost", "127.0.0.1") else "disable"
+        try:
+            conn = psycopg2.connect(
+                _settings.DATABASE_URL,
+                sslmode=_sslmode,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+            )
+            conn.autocommit = False
+            return conn
+        except psycopg2.OperationalError as e:
+            # Handle case where the database does not exist yet (pgcode 3D000 or text match)
+            if getattr(e, "pgcode", None) == "3D000" or "does not exist" in str(e).lower():
+                logger.warning("Database does not exist when connecting (%s). Attempting auto-creation...", e)
+                if _create_pg_database_if_not_exists(_settings.DATABASE_URL, _sslmode):
+                    conn = psycopg2.connect(
+                        _settings.DATABASE_URL,
+                        sslmode=_sslmode,
+                        cursor_factory=psycopg2.extras.RealDictCursor,
+                    )
+                    conn.autocommit = False
+                    return conn
+            raise
     else:
         conn = sqlite3.connect(_settings.DB_FILE)
         conn.row_factory = sqlite3.Row
@@ -596,7 +679,7 @@ def get_or_create_company_by_discord(
             "is_active": True,
             "tier": "free",
             "trial_used": 1,
-            "api_key": "",
+            "api_key": raw_api_key,
             "invite_code": invite_code,
         }
         member = {
