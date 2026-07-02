@@ -99,6 +99,9 @@ jobs:
     name: Cache Report
     runs-on: self-hosted
     needs: build-and-push
+    permissions:
+      actions: read
+      contents: read
 
     steps:
       - name: Checkout
@@ -109,6 +112,8 @@ jobs:
           sudo apt-get update && sudo apt-get install -y gh
 
       - name: List GitHub caches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh auth status
           gh actions-cache list -R ${{ github.repository }} > cache-report.txt
