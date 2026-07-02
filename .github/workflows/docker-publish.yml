@@ -10,6 +10,7 @@ on:
       - "pyproject.toml"
       - "Dockerfile"
       - ".dockerignore"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:
