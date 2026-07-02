@@ -382,3 +382,35 @@ class TestAutoSubtract:
         db.set_auto_subtract(True)
         db.set_auto_subtract(False)
         assert db.get_auto_subtract() is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: PostgreSQL Auto-Creation
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseAutoCreation:
+    """Verify database auto-creation helper logic."""
+
+    def test_create_pg_database_if_not_exists_sqlite(self):
+        """When not using PostgreSQL or url empty, auto-creation returns False."""
+        assert db._create_pg_database_if_not_exists("", "prefer") is False
+
+    def test_create_pg_database_if_not_exists_postgres(self, monkeypatch):
+        """When using PostgreSQL, should connect to maintenance db and execute CREATE DATABASE."""
+        from unittest.mock import MagicMock
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = None  # DB does not exist in pg_database
+
+        mock_connect = MagicMock(return_value=mock_conn)
+        monkeypatch.setattr("psycopg2.connect", mock_connect, raising=False)
+        monkeypatch.setattr(db, "_USE_POSTGRES", True)
+        monkeypatch.setattr("src.core.database.quote_ident", lambda s, c: f'"{s}"', raising=False)
+
+        res = db._create_pg_database_if_not_exists("postgres://user:pass@localhost:5432/new_test_db", "prefer")
+        assert res is True
+        mock_connect.assert_called_once_with("postgres://user:pass@localhost:5432/postgres", sslmode="prefer")
+        mock_cursor.execute.assert_any_call('CREATE DATABASE "new_test_db"')
